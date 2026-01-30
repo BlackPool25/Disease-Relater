@@ -157,6 +157,112 @@ Comprehensive report including:
 - Unique disease counts
 - Data quality metrics
 
+## ICD-10 Translation Module (Agent 1)
+
+Translates German ICD-10 disease descriptions to English using WHO official terminology and Google Translate fallback.
+
+### Overview
+
+The translation module (`scripts/translate_descriptions.py`) provides:
+- **WHO-verified translations** for 113 high-prevalence ICD codes (E11, I10, I25, etc.)
+- **Automated batch translation** for remaining 942 codes using Google Translate API
+- **Rate-limited processing** to avoid API bans (default: 25-50 codes/batch, 0.5-1s delay)
+- **Quality assurance** with verification reports and source tracking
+
+### Usage
+
+```bash
+# Basic translation (uses default settings)
+python scripts/translate_descriptions.py
+
+# Fast translation (larger batches, shorter delays)
+python scripts/translate_descriptions.py --batch-size 50 --delay 0.5
+
+# With WHO API key (optional, for additional official translations)
+python scripts/translate_descriptions.py --who-api-key YOUR_API_KEY
+```
+
+### Output Files
+
+All files created in `Data/processed/`:
+
+| File | Description | Size |
+|------|-------------|------|
+| `ICD10_Diagnoses_English.csv` | Full translations with metadata | ~141KB |
+| `disease_names.csv` | Simplified mapping (code → English name) | ~58KB |
+| `validation/translation_verification.txt` | Quality report with statistics | ~3KB |
+| `.translation_done` | Completion marker for downstream agents | 9B |
+
+### Translation Statistics
+
+Typical results for 1080 ICD codes:
+- **WHO verified**: ~113 codes (10.5%) - manually curated from WHO ICD-10 2019
+- **Auto-translated**: ~942 codes (87.2%) - Google Translate API
+- **Failed**: ~25 codes (2.3%) - empty/invalid entries preserved as German
+
+### Security & Quality Features
+
+- Input validation and sanitization
+- Secure logging (no PHI exposure)
+- Rate limiting to prevent API bans
+- Graceful error handling with fallback to original German
+- Comprehensive progress tracking
+- Verification report generation
+
+## Master Database Creation
+
+After running the cleaning pipeline, create unified master databases for downstream analysis:
+
+### Usage
+
+```bash
+# Create master databases (run after data cleaning)
+python scripts/create_master_database.py
+
+# Wait for Agent 1 translation (optional)
+python scripts/create_master_database.py --wait
+```
+
+### Output Files
+
+#### 1. diseases_master.csv
+
+Unified disease database with columns:
+- `icd_code`: Disease ICD-10 identifier
+- `name_english`: English disease name (populated when translation available)
+- `name_german`: German disease name
+- `chapter_code`: ICD-10 chapter (I-XXI)
+- `chapter_name`: Chapter description
+- `granularity`: ICD/Blocks/Chronic
+- `avg_prevalence_male`: Average prevalence in males (0-1)
+- `avg_prevalence_female`: Average prevalence in females (0-1)
+
+**Statistics:** 736 diseases (all with German names, prevalence data from 135,708 records)
+
+#### 2. disease_relationships_master.csv
+
+Aggregated relationships across all strata:
+- `disease_1_code`, `disease_2_code`: Disease identifiers
+- `disease_1_name`, `disease_2_name`: English disease names
+- `odds_ratio_avg`: Mean odds ratio across all stratifications
+- `p_value_avg`: Mean p-value across all stratifications  
+- `patient_count_total`: Total patient count (sum across strata)
+- `icd_chapter_1`, `icd_chapter_2`: Chapter classifications
+
+**Statistics:** 9,232 unique relationships (aggregated from 74,901 stratified pairs)
+
+#### 3. data_summary.json
+
+Comprehensive summary including:
+- Total counts (diseases, relationships)
+- Prevalence statistics by sex
+- Diseases by chapter distribution
+- Most connected diseases (top 20 by relationship count)
+- Strongest relationships (top 10 by odds ratio)
+- Statistical summaries (mean/median odds ratios, total observations)
+
+**Example strongest relationship:** F00 (Dementia) ↔ G30 (Alzheimer's): OR = 60,143
+
 ## API Usage
 
 You can also use the pipeline programmatically:
@@ -231,7 +337,13 @@ The pipeline processes 82 stratified matrices:
 ## Notes
 
 - **Required Step**: Always run `export_contingency_tables.R` before the Python pipeline
-- **Export Time**: The R export script takes ~5-10 minutes to process all 6 RDS files
+- **Export Time**: The R export script takes ~5-10 minutes for Blocks/Chronic, but 30-60 minutes for ICD files (especially ICD Male which is ~107MB with 1080×1080 matrices)
+- **Missing P-values**: You may see "P-values available: X / Y" in the report. This occurs when:
+  1. **Export incomplete**: The R export script hasn't finished processing all files yet. The script processes files sequentially, and ICD Male (the largest) is processed last. Check progress with: `ls Data/Data/2.ContingencyTables/exported/ | grep ICD_ContingencyTables_Male | wc -l` (should be 42 when complete)
+  2. **Statistical test failures**: The R script attempts Mantel-Haenszel test first, then falls back to Fisher's exact test. If both fail due to insufficient data (< 2 rows after filtering), p-value is set to NA
+  3. **Insufficient contingency table data**: Disease pairs with limited co-occurrence data cannot be statistically tested
+- **Rerun Export**: If the export was interrupted, simply run it again - it will process only missing files
+- **Expected Completion**: All 252 CSV files (6 RDS × 14 stratifications × 3 matrices) should be generated
 - Translation requires internet connection (uses Google Translate via deep-translator)
 - Processing time depends on the number of matrices and system performance
 - The 1080×1080 ICD matrices are the largest and take longest to process

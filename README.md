@@ -7,7 +7,8 @@ A comprehensive research platform for analyzing comorbidity networks from popula
 This project provides tools to analyze comorbidity networks derived from 8.9 million Austrian hospital patients (1997-2014). It includes:
 
 - **R Pipeline**: Network construction, analysis, and visualization (82 stratified matrices)
-- **Python Pipeline**: Data cleaning, transformation, and preprocessing
+- **Python Pipeline**: Data cleaning, transformation, and 3D embedding generation
+- **3D Embeddings**: Generate 3D coordinates using UMAP, t-SNE, or force-directed layouts for disease network visualization
 - **Multi-granularity support**: ICD-10 codes (1080), ICD Blocks (131), Chronic conditions (46)
 - **Statistical analysis**: Odds ratios, p-values, prevalence calculations
 - **Network files**: GEXF format for Gephi visualization
@@ -27,9 +28,13 @@ Disease-Relater/
 │   │   ├── 3_Net_Properties.R              # Network analysis and metrics
 │   │   └── Example_PythonScript.ipynb      # Python example notebook
 │   └── README.md                           # R pipeline documentation
-├── scripts/                                # Python data cleaning
+├── scripts/                                # Python data cleaning & embeddings
 │   ├── data_cleaning.py                    # Core cleaning module
 │   ├── run_cleaning.py                     # CLI entry point
+│   ├── translate_descriptions.py          # ICD-10 German→English translation (Module 1.2)
+│   ├── create_master_database.py           # Create unified master databases (Module 1.3)
+│   ├── generate_3d_embeddings.py           # Generate 3D disease coordinates (Module 1.4)
+│   ├── demo_3d_embeddings.py               # Demo script for testing embeddings
 │   └── export_contingency_tables.R         # R export script (required)
 ├── requirements.txt                        # Python dependencies
 ├── pyproject.toml                          # Modern Python project config
@@ -156,7 +161,54 @@ print(report)
 - `disease_metadata.csv` - Disease metadata with ICD chapter mapping
 - `processing_report.txt` - Comprehensive validation report
 
-### 2. R Network Analysis Pipeline
+### 2. 3D Embedding Generation (Module 1.4)
+
+Generate 3D coordinates from adjacency matrices using multiple dimensionality reduction techniques for interactive disease network visualization.
+
+**Prerequisite**: Adjacency matrices must be generated first by the R pipeline.
+
+```bash
+# Generate 3D coordinates using UMAP (recommended)
+python scripts/generate_3d_embeddings.py --method umap
+
+# Try different embedding methods
+python scripts/generate_3d_embeddings.py --method tsne
+python scripts/generate_3d_embeddings.py --method spring
+
+# Process different stratifications
+python scripts/generate_3d_embeddings.py --method umap --sex Female --year 2011-2012
+```
+
+#### Embedding Methods
+
+| Method | Speed | Quality | Best For |
+|--------|-------|---------|----------|
+| `umap` | Fast (~30s) | Good global + local structure | **Recommended default** |
+| `tsne` | Slow (~2-5min) | Best local clustering | Detailed cluster analysis |
+| `spring` | Medium (~1-2min) | Network-aware layout | Network topology visualization |
+
+#### Quality Validation
+
+The pipeline automatically validates embedding quality by measuring clustering of diseases within the same ICD chapter:
+
+- **Clustering Ratio**: between-chapter distance / within-chapter distance
+- **Target**: > 1.5 (diseases in same chapter cluster together)
+- **Output**: `Data/validation/embedding_quality_report.txt`
+
+**Output Files:**
+- `disease_vectors_3d.csv` - 3D coordinates (x, y, z) for each disease
+- `Data/validation/3d_embedding_visualization.png` - 3D scatter plot colored by ICD chapter
+- `Data/validation/embedding_quality_report.txt` - Quality metrics and validation
+
+#### Demo/Testing
+
+Test the embedding pipeline with synthetic data:
+
+```bash
+python scripts/demo_3d_embeddings.py
+```
+
+### 3. R Network Analysis Pipeline
 
 The R scripts generate comorbidity networks from contingency tables.
 
@@ -208,8 +260,11 @@ Rscript scripts/export_contingency_tables.R
 # 4. Run Python cleaning pipeline
 python scripts/run_cleaning.py --data-dir Data --output-dir data/processed --translate
 
-# 5. Run R analysis pipeline (optional, for network generation)
+# 5. Run R analysis pipeline to generate adjacency matrices
 Rscript -e "setwd('Comorbidity-Networks-From-Population-Wide-Health-Data'); source('Scripts/1_Make_AdjMatrix_ICD.R')"
+
+# 6. Generate 3D embeddings for visualization
+python scripts/generate_3d_embeddings.py --method umap --data-dir Data --output-dir data/processed
 ```
 
 ## Data Requirements
@@ -268,6 +323,30 @@ Edit the R scripts to adjust:
 - `all_ages`: Age groups (default: seq(1, 16, by = 2))
 - Statistical thresholds: p-value < 0.05, OR > 1.5, min cases = 100
 
+### 3D Embedding Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--method` | `umap` | Embedding algorithm: umap, tsne, or spring |
+| `--sex` | `Male` | Patient sex stratification: Male or Female |
+| `--year` | `2013-2014` | Year period for data |
+| `--data-dir` | `Data` | Root data directory |
+| `--output-dir` | `data/processed` | Output directory |
+
+**Algorithm-Specific Parameters:**
+
+UMAP (via `embed_umap()`):
+- `n_neighbors`: Number of neighbors for local structure (default: 15)
+- `min_dist`: Minimum distance between points (default: 0.1)
+
+t-SNE (via `embed_tsne()`):
+- `perplexity`: Effective number of neighbors (default: 30, range: 5-50)
+- `max_iter`: Number of optimization iterations (default: 1000)
+
+Spring Layout (via `embed_spring_layout()`):
+- `k`: Optimal distance between nodes (default: 0.5)
+- `iterations`: Convergence iterations (default: 100)
+
 ## Output Files
 
 ### Python Pipeline Outputs
@@ -285,6 +364,14 @@ Edit the R scripts to adjust:
 
 **disease_metadata.csv:**
 - Disease codes, names (DE/EN), ICD chapters, prevalence rates
+
+**disease_vectors_3d.csv:**
+- `icd_code`: Disease identifier
+- `vector_x`, `vector_y`, `vector_z`: 3D coordinates (normalized to [-1, 1])
+
+**3D Embedding Validation:**
+- `Data/validation/3d_embedding_visualization.png` - 3D scatter plot colored by ICD chapter
+- `Data/validation/embedding_quality_report.txt` - Clustering quality metrics
 
 ### R Pipeline Outputs
 
@@ -367,6 +454,52 @@ python scripts/run_cleaning.py
 # Solution: Check R version and install required packages
 R --version  # Should be 4.0+
 Rscript -e "install.packages('stats')"  # Usually included in base R
+```
+
+**Issue:** Report shows "P-values available: X / Y" with missing values
+```bash
+# This is normal and can occur for several reasons:
+
+# 1. Export still running (ICD Male takes 30-60 minutes)
+# Check progress:
+ls Data/Data/2.ContingencyTables/exported/ | grep ICD_ContingencyTables_Male | wc -l
+# Should show 42 files when complete (14 stratifications × 3 file types)
+
+# 2. Statistical tests failed for some disease pairs
+# The R script attempts Mantel-Haenszel test first, then falls back to Fisher's exact test
+# If both fail (insufficient data), p-value is set to NA
+
+# 3. Export was interrupted
+# Solution: Simply re-run the export script - it will continue where it left off
+Rscript scripts/export_contingency_tables.R
+```
+
+**Issue:** `ModuleNotFoundError: No module named 'umap'` or similar
+```bash
+# Solution: Install ML dependencies
+pip3 install networkx scikit-learn umap-learn matplotlib scipy
+
+# Or with uv:
+uv pip install networkx scikit-learn umap-learn matplotlib scipy
+```
+
+**Issue:** `FileNotFoundError: Adjacency matrix not found`
+```bash
+# Solution: Run R scripts to generate adjacency matrices first
+Rscript -e "setwd('Comorbidity-Networks-From-Population-Wide-Health-Data'); source('Scripts/1_Make_AdjMatrix_ICD.R')"
+
+# Then re-run 3D embedding script
+python scripts/generate_3d_embeddings.py --method umap
+```
+
+**Issue:** Embedding quality ratio < 1.5 (clustering check fails)
+```bash
+# Solution: Try a different embedding method
+tpython scripts/generate_3d_embeddings.py --method tsne  # Often better for local clusters
+python scripts/generate_3d_embeddings.py --method spring  # Network-aware layout
+
+# Or adjust UMAP parameters for more structure
+# Edit scripts/generate_3d_embeddings.py and increase n_neighbors
 ```
 
 ### Performance Tips

@@ -374,13 +374,30 @@ def extract_pvalues_from_csv(
         return None, None, None
 
     try:
-        # Load matrices from CSV files
-        pvalues = np.loadtxt(pvalue_file, delimiter=",")
-        counts = np.loadtxt(count_file, delimiter=",")
+        # Load matrices from CSV files using pandas to handle NA values
+        # pandas automatically converts "NA" strings to np.nan
+        pvalues_df = pd.read_csv(
+            pvalue_file, header=None, na_values=["NA", "NaN", "", "N/A"]
+        )
+        counts_df = pd.read_csv(
+            count_file, header=None, na_values=["NA", "NaN", "", "N/A"]
+        )
 
-        # Load odds ratios if available, otherwise compute from adjacency matrix
+        # Convert to numpy arrays
+        pvalues = pvalues_df.to_numpy()
+        counts = counts_df.to_numpy()
+
+        # Replace NaN with NA for p-values, 0 for counts
+        pvalues = np.where(np.isnan(pvalues), np.nan, pvalues)
+        counts = np.where(np.isnan(counts), 0, counts)
+
+        # Load odds ratios if available
         if os.path.exists(or_file):
-            odds_ratios = np.loadtxt(or_file, delimiter=",")
+            or_df = pd.read_csv(
+                or_file, header=None, na_values=["NA", "NaN", "", "N/A"]
+            )
+            odds_ratios = or_df.to_numpy()
+            odds_ratios = np.where(np.isnan(odds_ratios), 0, odds_ratios)
         else:
             odds_ratios = None
 
@@ -628,9 +645,9 @@ def generate_metadata(
             # Calculate aggregated prevalence if data available
             prevalence_rate = None
             if prevalence_df is not None and not prevalence_df.empty:
-                prev_subset = prevalence_df[prevalence_df["ICD"] == code]
+                prev_subset = prevalence_df[prevalence_df["icd_code"] == code]
                 if not prev_subset.empty:
-                    prevalence_rate = prev_subset["Prevalence"].mean()
+                    prevalence_rate = prev_subset["p"].mean()
 
             metadata.append(
                 {

@@ -1,0 +1,1185 @@
+3D DISEASE COMORBIDITY VISUALIZATION PLATFORM
+PROJECT BREAKDOWN (UPDATED FOR AUSTRIAN DATASET)
+Based on Actual Data Structure Analysis
+
+============================================================
+EXECUTIVE SUMMARY
+============================================================
+
+DATA ASSETS AVAILABLE:
+✓ Pre-computed adjacency matrices (1080×1080 for ICD codes)
+✓ 82 network variants (by sex, age, year)
+✓ Prevalence data by demographics
+✓ GEXF visualization files (ready to use)
+✓ ICD-10 diagnosis codes with German descriptions
+
+KEY SIMPLIFICATIONS:
+✗ No need to calculate disease embeddings from scratch
+✗ No need to build adjacency matrices
+✓ Can use existing GEXF files directly
+✓ Focus on user interface and risk calculation
+
+REVISED TIMELINE: 6-8 weeks (down from 8-12)
+
+
+============================================================
+TABLE OF CONTENTS
+============================================================
+
+PHASE 1: DATA PREPARATION
+    Module 1.1: Extract Data from .rds Files
+    Module 1.2: Translate Disease Descriptions
+    Module 1.3: Create Unified Disease Database
+    Module 1.4: Generate 3D Coordinates from Adjacency Matrices
+
+PHASE 2: BACKEND DEVELOPMENT
+    Module 2.1: Database Schema & Import
+    Module 2.2: API Development
+    Module 2.3: Risk Calculation Engine
+    Module 2.4: Network Selection Logic
+
+PHASE 3: FRONTEND DEVELOPMENT
+    Module 3.1: User Input Form (same as before)
+    Module 3.2: 3D Visualization with GEXF Import
+    Module 3.3: UI/UX Design System (same as before)
+    Module 3.4: Dashboard Layout (same as before)
+
+PHASE 4: INTEGRATION & TESTING
+    Module 4.1: API Integration
+    Module 4.2: Testing Suite
+    Module 4.3: Performance Optimization
+
+PHASE 5: DEPLOYMENT
+    (Same as before)
+
+
+============================================================
+PHASE 1: DATA PREPARATION
+============================================================
+
+────────────────────────────────────────────────────────────
+MODULE 1.1: EXTRACT DATA FROM .RDS FILES
+────────────────────────────────────────────────────────────
+
+TASK ID: DATA-001
+ASSIGNED TO: R Developer / Data Engineer
+ESTIMATED TIME: 6 hours
+DEPENDENCIES: None
+DELIVERABLE: CSV files with p-values and patient counts
+
+INSTRUCTIONS:
+The .rds files contain contingency tables with statistical data that's missing from the CSV files.
+Your job is to extract this data and save it in a usable format.
+
+INPUT FILES:
+/Data/2.ContingencyTables/ICD_ContingencyTables_Male_Final.rds
+/Data/2.ContingencyTables/ICD_ContingencyTables_Female_Final.rds
+(And the Blocks/Chronic versions)
+
+R SCRIPT TO WRITE:
+
+```r
+# extract_contingency_data.R
+library(tidyverse)
+
+# Load contingency table
+male_tables <- readRDS("Data/2.ContingencyTables/ICD_ContingencyTables_Male_Final.rds")
+female_tables <- readRDS("Data/2.ContingencyTables/ICD_ContingencyTables_Female_Final.rds")
+
+# Examine structure
+str(male_tables)
+# Expected: List of lists with disease pairs and their statistics
+
+# Extract function
+extract_disease_pairs <- function(contingency_data, sex) {
+  # This will vary based on actual .rds structure
+  # Adjust after inspecting the data
+  
+  results <- data.frame(
+    disease_1_code = character(),
+    disease_2_code = character(),
+    odds_ratio = numeric(),
+    p_value = numeric(),
+    patient_count = integer(),
+    sex = character(),
+    stringsAsFactors = FALSE
+  )
+  
+  # Loop through structure and extract
+  # Example (adjust to actual structure):
+  for (stratum in names(contingency_data)) {
+    for (pair in contingency_data[[stratum]]) {
+      results <- rbind(results, data.frame(
+        disease_1_code = pair$disease_1,
+        disease_2_code = pair$disease_2,
+        odds_ratio = pair$OR,
+        p_value = pair$p_value,
+        patient_count = pair$n,
+        sex = sex,
+        stratum = stratum
+      ))
+    }
+  }
+  
+  return(results)
+}
+
+# Extract for both sexes
+male_pairs <- extract_disease_pairs(male_tables, "male")
+female_pairs <- extract_disease_pairs(female_tables, "female")
+
+# Combine
+all_pairs <- rbind(male_pairs, female_pairs)
+
+# Filter (same criteria as original dataset)
+filtered_pairs <- all_pairs %>%
+  filter(
+    odds_ratio >= 1.5,
+    p_value < 0.05,
+    patient_count >= 100
+  )
+
+# Save
+write.csv(filtered_pairs, "Data/processed/disease_pairs_with_stats.csv", row.names = FALSE)
+
+# Summary statistics
+summary_stats <- filtered_pairs %>%
+  group_by(sex, stratum) %>%
+  summarise(
+    n_pairs = n(),
+    mean_OR = mean(odds_ratio),
+    median_patients = median(patient_count)
+  )
+
+write.csv(summary_stats, "Data/processed/extraction_summary.csv", row.names = FALSE)
+```
+
+EXPECTED OUTPUT STRUCTURE:
+
+disease_pairs_with_stats.csv:
+```
+disease_1_code,disease_2_code,odds_ratio,p_value,patient_count,sex,stratum
+A00,A01,2.3,0.001,150,male,age_4
+E11,I10,3.2,0.0001,5234,female,year_2007-2008
+...
+```
+
+VALIDATION:
+- Verify total pairs match adjacency matrix non-zero entries
+- Check OR values match those in adjacency matrices
+- Confirm no missing values
+
+OUTPUT FILES:
+/Data/processed/disease_pairs_with_stats.csv
+/Data/processed/extraction_summary.csv
+/code/extract_contingency_data.R
+
+SUCCESS CRITERIA:
+✓ All .rds files successfully read
+✓ P-values and patient counts extracted
+✓ CSV format matches specification
+✓ Summary statistics generated
+
+
+────────────────────────────────────────────────────────────
+MODULE 1.2: TRANSLATE DISEASE DESCRIPTIONS
+────────────────────────────────────────────────────────────
+
+TASK ID: DATA-002
+ASSIGNED TO: Data Engineer
+ESTIMATED TIME: 4 hours
+DEPENDENCIES: None
+DELIVERABLE: ICD codes with English descriptions
+
+INSTRUCTIONS:
+The ICD10_Diagnoses_All.csv file has German descriptions.
+For an Indian audience, translate these to English.
+
+INPUT FILE:
+/Comorbidity-Networks-From-Population-Wide-Health-Data/ICD10_Diagnoses_All.csv
+
+Current structure:
+```
+diagnose_id,icd_code,descr
+1,"A00","Cholera"
+2,"A01","Typhus abdominalis und Paratyphus"
+...
+```
+
+TRANSLATION APPROACH:
+
+Option 1: Use WHO's Official ICD-10 Database
+- Go to: https://icd.who.int/browse10/2019/en
+- For each ICD code, look up the official English name
+- Manual but most accurate
+
+Option 2: Automated Translation + Verification
+- Use DeepL or Google Translate API
+- Translate German → English
+- Manually verify top 100 most common diagnoses
+- Spot-check random samples
+
+PYTHON SCRIPT:
+
+```python
+import pandas as pd
+import requests
+from googletrans import Translator  # or use DeepL API
+
+# Load German descriptions
+df = pd.read_csv('ICD10_Diagnoses_All.csv')
+
+# Option 1: Manual mapping for common ones
+manual_translations = {
+    "A00": "Cholera",
+    "A01": "Typhoid and paratyphoid fevers",
+    "E11": "Type 2 diabetes mellitus",
+    "I10": "Essential (primary) hypertension",
+    "I25": "Chronic ischemic heart disease",
+    # ... add top 100
+}
+
+# Option 2: Automated translation
+translator = Translator()
+
+def translate_description(german_text, icd_code):
+    # Check manual mapping first
+    if icd_code in manual_translations:
+        return manual_translations[icd_code]
+    
+    # Otherwise translate
+    try:
+        translated = translator.translate(german_text, src='de', dest='en')
+        return translated.text
+    except:
+        return german_text  # fallback to German if translation fails
+
+# Apply translation
+df['descr_english'] = df.apply(
+    lambda row: translate_description(row['descr'], row['icd_code']), 
+    axis=1
+)
+
+# Keep both languages for reference
+df = df.rename(columns={'descr': 'descr_german'})
+
+# Reorder columns
+df = df[['diagnose_id', 'icd_code', 'descr_english', 'descr_german']]
+
+# Save
+df.to_csv('Data/processed/ICD10_Diagnoses_English.csv', index=False)
+
+# Create a simplified version (just code and English name)
+simple_df = df[['icd_code', 'descr_english']]
+simple_df.to_csv('Data/processed/disease_names.csv', index=False)
+```
+
+MANUAL VERIFICATION CHECKLIST:
+Review and verify these high-prevalence/high-risk conditions:
+□ E11 - Type 2 diabetes mellitus
+□ I10 - Essential hypertension
+□ I25 - Chronic ischemic heart disease
+□ I50 - Heart failure
+□ J44 - Chronic obstructive pulmonary disease
+□ N18 - Chronic kidney disease
+□ E78 - Disorders of lipoprotein metabolism
+□ M81 - Osteoporosis
+□ F32 - Depressive episode
+□ J45 - Asthma
+
+OUTPUT FILES:
+/Data/processed/ICD10_Diagnoses_English.csv
+/Data/processed/disease_names.csv (simplified: code, name)
+/code/translate_descriptions.py
+/Data/validation/translation_verification.txt (list of verified translations)
+
+SUCCESS CRITERIA:
+✓ All 1080 diseases have English names
+✓ Top 100 manually verified
+✓ No untranslated German text in output
+✓ Simplified CSV created for easy lookups
+
+
+────────────────────────────────────────────────────────────
+MODULE 1.3: CREATE UNIFIED DISEASE DATABASE
+────────────────────────────────────────────────────────────
+
+TASK ID: DATA-003
+ASSIGNED TO: Data Engineer
+ESTIMATED TIME: 6 hours
+DEPENDENCIES: DATA-001, DATA-002
+DELIVERABLE: Single master dataset combining all information
+
+INSTRUCTIONS:
+Combine disease names, prevalence, and relationship data into one unified database.
+
+INPUT FILES:
+- /Data/1.Prevalence/Prevalence_Sex_Age_Year_ICD.csv
+- /Data/processed/ICD10_Diagnoses_English.csv
+- /Data/processed/disease_pairs_with_stats.csv
+
+OUTPUT STRUCTURE:
+
+File 1: diseases_master.csv
+```
+icd_code,name_english,name_german,icd_chapter,avg_prevalence_male,avg_prevalence_female
+E11,Type 2 diabetes mellitus,Diabetes mellitus Typ 2,E,0.0823,0.0612
+I10,Essential hypertension,Essentielle Hypertonie,I,0.1245,0.0987
+...
+```
+
+File 2: disease_relationships_master.csv
+```
+disease_1_code,disease_1_name,disease_2_code,disease_2_name,odds_ratio_avg,p_value_avg,patient_count_total,prevalence_sex,prevalence_age_group
+E11,Type 2 diabetes,I10,Hypertension,3.2,0.0001,5234,both,40-49
+...
+```
+
+PYTHON SCRIPT:
+
+```python
+import pandas as pd
+import numpy as np
+
+# Load all data
+icd_names = pd.read_csv('Data/processed/ICD10_Diagnoses_English.csv')
+prevalence = pd.read_csv('Data/1.Prevalence/Prevalence_Sex_Age_Year_ICD.csv')
+relationships = pd.read_csv('Data/processed/disease_pairs_with_stats.csv')
+
+# === CREATE DISEASES MASTER ===
+
+# Extract ICD chapter (first letter of code)
+icd_names['icd_chapter'] = icd_names['icd_code'].str[0]
+
+# Calculate average prevalence by sex
+prev_summary = prevalence.groupby(['icd_code', 'sex'])['p'].mean().reset_index()
+prev_wide = prev_summary.pivot(index='icd_code', columns='sex', values='p')
+prev_wide.columns = ['avg_prevalence_female', 'avg_prevalence_male']
+
+# Merge
+diseases_master = icd_names.merge(prev_wide, on='icd_code', how='left')
+
+# Fill missing prevalence with 0
+diseases_master = diseases_master.fillna({'avg_prevalence_male': 0, 'avg_prevalence_female': 0})
+
+# Add chapter names
+chapter_names = {
+    'A': 'Infectious diseases',
+    'B': 'Infectious diseases',
+    'C': 'Neoplasms',
+    'D': 'Blood disorders',
+    'E': 'Endocrine and metabolic',
+    'F': 'Mental and behavioral',
+    'G': 'Nervous system',
+    'H': 'Eye and ear',
+    'I': 'Circulatory system',
+    'J': 'Respiratory system',
+    'K': 'Digestive system',
+    'L': 'Skin',
+    'M': 'Musculoskeletal',
+    'N': 'Genitourinary system'
+}
+diseases_master['chapter_name'] = diseases_master['icd_chapter'].map(chapter_names)
+
+# Save
+diseases_master.to_csv('Data/processed/diseases_master.csv', index=False)
+
+# === CREATE RELATIONSHIPS MASTER ===
+
+# Group relationships by disease pair (averaging across strata)
+rel_summary = relationships.groupby(['disease_1_code', 'disease_2_code']).agg({
+    'odds_ratio': 'mean',
+    'p_value': 'mean',
+    'patient_count': 'sum'
+}).reset_index()
+
+# Add disease names
+rel_summary = rel_summary.merge(
+    icd_names[['icd_code', 'descr_english']], 
+    left_on='disease_1_code', 
+    right_on='icd_code', 
+    how='left'
+).rename(columns={'descr_english': 'disease_1_name'}).drop(columns=['icd_code'])
+
+rel_summary = rel_summary.merge(
+    icd_names[['icd_code', 'descr_english']], 
+    left_on='disease_2_code', 
+    right_on='icd_code', 
+    how='left'
+).rename(columns={'descr_english': 'disease_2_name'}).drop(columns=['icd_code'])
+
+# Save
+rel_summary.to_csv('Data/processed/disease_relationships_master.csv', index=False)
+
+# === CREATE SUMMARY STATISTICS ===
+
+summary = {
+    'total_diseases': len(diseases_master),
+    'total_relationships': len(rel_summary),
+    'avg_prevalence': diseases_master[['avg_prevalence_male', 'avg_prevalence_female']].mean().mean(),
+    'diseases_by_chapter': diseases_master.groupby('icd_chapter').size().to_dict(),
+    'most_connected_diseases': rel_summary.groupby('disease_1_code').size().nlargest(10).to_dict()
+}
+
+import json
+with open('Data/processed/data_summary.json', 'w') as f:
+    json.dump(summary, f, indent=2)
+```
+
+VALIDATION CHECKS:
+- Verify all 1080 diseases present
+- Check prevalence values are between 0 and 1
+- Confirm relationships are symmetric (if A→B exists, B→A should too)
+- Validate odds ratios are >= 1.5
+
+OUTPUT FILES:
+/Data/processed/diseases_master.csv
+/Data/processed/disease_relationships_master.csv
+/Data/processed/data_summary.json
+/code/create_master_database.py
+
+SUCCESS CRITERIA:
+✓ All diseases have names and prevalence
+✓ All relationships have both disease names
+✓ No missing or invalid values
+✓ Summary statistics generated
+
+
+────────────────────────────────────────────────────────────
+MODULE 1.4: GENERATE 3D COORDINATES FROM ADJACENCY MATRICES
+────────────────────────────────────────────────────────────
+
+TASK ID: DATA-004
+ASSIGNED TO: ML Engineer
+ESTIMATED TIME: 8 hours
+DEPENDENCIES: DATA-003
+DELIVERABLE: 3D coordinates for all diseases
+
+INSTRUCTIONS:
+You have 1080×1080 adjacency matrices with odds ratios.
+Convert these into 3D coordinates (x,y,z) for visualization.
+
+INPUT FILES:
+/Data/3.AdjacencyMatrices/Adj_Matrix_Male_ICD_*.csv
+/Data/3.AdjacencyMatrices/Adj_Matrix_Female_ICD_*.csv
+
+Choose which matrix to use:
+- **Recommended**: Use overall/average matrix (combine all age/year strata)
+- **Alternative**: Use specific stratum (e.g., age 40-49, year 2013-2014)
+
+APPROACH:
+
+Step 1: Load Adjacency Matrix
+
+```python
+import pandas as pd
+import numpy as np
+
+# Load one adjacency matrix (or create average from all)
+adj_matrix = pd.read_csv(
+    'Data/3.AdjacencyMatrices/Adj_Matrix_Male_ICD_year_2013-2014.csv',
+    sep=' ',
+    header=None
+)
+
+# Convert to numpy array (1080 x 1080)
+adj_array = adj_matrix.values
+
+# Make symmetric (ensure symmetry if not already)
+adj_array = (adj_array + adj_array.T) / 2
+
+# Replace 0s with small value (for graph algorithms)
+adj_array_nonzero = np.where(adj_array == 0, 0.001, adj_array)
+```
+
+Step 2: Apply Graph Embedding
+
+Option A: Using Force-Directed Layout (NetworkX)
+```python
+import networkx as nx
+
+# Create graph
+G = nx.from_numpy_array(adj_array_nonzero)
+
+# Use spring layout in 3D
+pos_3d = nx.spring_layout(G, dim=3, k=0.5, iterations=50)
+
+# Extract coordinates
+coords = np.array([pos_3d[i] for i in range(len(pos_3d))])
+# coords is now (1080, 3) array
+```
+
+Option B: Using t-SNE (Better for clustering)
+```python
+from sklearn.manifold import TSNE
+
+# Normalize adjacency matrix
+from sklearn.preprocessing import StandardScaler
+adj_normalized = StandardScaler().fit_transform(adj_array)
+
+# Apply t-SNE
+tsne = TSNE(n_components=3, perplexity=30, random_state=42, n_iter=1000)
+coords = tsne.fit_transform(adj_normalized)
+```
+
+Option C: Using UMAP (Fastest, preserves structure)
+```python
+from umap import UMAP
+
+embedder = UMAP(n_components=3, n_neighbors=15, metric='precomputed', random_state=42)
+# Convert to distance matrix (inverse of similarity)
+dist_matrix = 1 / (adj_array_nonzero + 0.001)
+coords = embedder.fit_transform(dist_matrix)
+```
+
+Step 3: Normalize Coordinates
+
+```python
+from sklearn.preprocessing import MinMaxScaler
+
+# Normalize to [-1, 1] range for visualization
+scaler = MinMaxScaler(feature_range=(-1, 1))
+coords_normalized = scaler.fit_transform(coords)
+```
+
+Step 4: Create Output
+
+```python
+# Load disease codes
+icd_codes = pd.read_csv('Data/processed/diseases_master.csv')['icd_code'].tolist()
+
+# Create DataFrame
+disease_vectors = pd.DataFrame({
+    'icd_code': icd_codes,
+    'vector_x': coords_normalized[:, 0],
+    'vector_y': coords_normalized[:, 1],
+    'vector_z': coords_normalized[:, 2]
+})
+
+# Save
+disease_vectors.to_csv('Data/processed/disease_vectors_3d.csv', index=False)
+```
+
+Step 5: Validation
+
+```python
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+# Load for visualization
+diseases = pd.read_csv('Data/processed/diseases_master.csv')
+vectors = pd.read_csv('Data/processed/disease_vectors_3d.csv')
+
+# Merge
+data = diseases.merge(vectors, on='icd_code')
+
+# Plot by chapter
+fig = plt.figure(figsize=(12, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+chapters = data['icd_chapter'].unique()
+colors = plt.cm.tab10(np.linspace(0, 1, len(chapters)))
+
+for i, chapter in enumerate(chapters):
+    chapter_data = data[data['icd_chapter'] == chapter]
+    ax.scatter(
+        chapter_data['vector_x'],
+        chapter_data['vector_y'],
+        chapter_data['vector_z'],
+        c=[colors[i]],
+        label=chapter,
+        alpha=0.6
+    )
+
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+ax.legend()
+plt.savefig('Data/validation/3d_embedding_visualization.png', dpi=300)
+plt.close()
+
+# Validation metrics
+print("Coordinate ranges:")
+print(f"X: {vectors['vector_x'].min():.3f} to {vectors['vector_x'].max():.3f}")
+print(f"Y: {vectors['vector_y'].min():.3f} to {vectors['vector_y'].max():.3f}")
+print(f"Z: {vectors['vector_z'].min():.3f} to {vectors['vector_z'].max():.3f}")
+
+# Check clustering (diseases in same chapter should be close)
+from scipy.spatial.distance import pdist, squareform
+dist_matrix_3d = squareform(pdist(coords_normalized))
+
+# Average distance within vs between chapters
+within_chapter_dist = []
+between_chapter_dist = []
+
+for chapter in chapters:
+    chapter_indices = data[data['icd_chapter'] == chapter].index
+    other_indices = data[data['icd_chapter'] != chapter].index
+    
+    within_dist = dist_matrix_3d[np.ix_(chapter_indices, chapter_indices)].mean()
+    between_dist = dist_matrix_3d[np.ix_(chapter_indices, other_indices)].mean()
+    
+    within_chapter_dist.append(within_dist)
+    between_chapter_dist.append(between_dist)
+
+print(f"\nAverage within-chapter distance: {np.mean(within_chapter_dist):.3f}")
+print(f"Average between-chapter distance: {np.mean(between_chapter_dist):.3f}")
+print(f"Clustering quality: {np.mean(between_chapter_dist) / np.mean(within_chapter_dist):.2f}x")
+```
+
+PARAMETERS TO EXPERIMENT WITH:
+- t-SNE perplexity: 20, 30, 50
+- UMAP n_neighbors: 10, 15, 30
+- Spring layout k: 0.3, 0.5, 1.0
+- Random seed: try multiple (42, 123, 456) and pick best
+
+SELECTION CRITERIA:
+Choose the embedding that:
+- Has good visual separation between ICD chapters
+- Clustering quality ratio > 1.5
+- Doesn't have "crowded" regions (check nearest neighbor distances)
+
+OUTPUT FILES:
+/Data/processed/disease_vectors_3d.csv
+/Data/validation/3d_embedding_visualization.png
+/Data/validation/embedding_quality_report.txt
+/code/generate_3d_embeddings.py
+
+SUCCESS CRITERIA:
+✓ All 1080 diseases have 3D coordinates
+✓ Coordinates normalized to [-1, 1]
+✓ Visual inspection shows chapter clustering
+✓ Clustering quality ratio > 1.5
+✓ Reproducible (random seed set)
+
+
+============================================================
+PHASE 2: BACKEND DEVELOPMENT
+============================================================
+
+────────────────────────────────────────────────────────────
+MODULE 2.1: DATABASE SCHEMA & IMPORT
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-001
+ASSIGNED TO: Backend Developer
+ESTIMATED TIME: 8 hours
+DEPENDENCIES: DATA-003, DATA-004
+DELIVERABLE: Database with all disease data imported
+
+INSTRUCTIONS:
+Create database schema and import all processed data.
+
+DATABASE SCHEMA:
+
+```sql
+-- Table 1: Diseases
+CREATE TABLE diseases (
+    id SERIAL PRIMARY KEY,
+    icd_code VARCHAR(10) UNIQUE NOT NULL,
+    name_english VARCHAR(255) NOT NULL,
+    name_german VARCHAR(255),
+    icd_chapter CHAR(1) NOT NULL,
+    chapter_name VARCHAR(100),
+    prevalence_male DECIMAL(10,8),
+    prevalence_female DECIMAL(10,8),
+    vector_x DECIMAL(10,6),
+    vector_y DECIMAL(10,6),
+    vector_z DECIMAL(10,6),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Index on ICD code for fast lookups
+CREATE INDEX idx_diseases_icd_code ON diseases(icd_code);
+CREATE INDEX idx_diseases_chapter ON diseases(icd_chapter);
+
+-- Table 2: Disease Relationships
+CREATE TABLE disease_relationships (
+    id SERIAL PRIMARY KEY,
+    disease_1_id INTEGER REFERENCES diseases(id),
+    disease_2_id INTEGER REFERENCES diseases(id),
+    odds_ratio DECIMAL(10,4) NOT NULL,
+    p_value DECIMAL(10,8) NOT NULL,
+    patient_count INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT unique_disease_pair UNIQUE (disease_1_id, disease_2_id)
+);
+
+-- Indexes for fast relationship queries
+CREATE INDEX idx_relationships_disease1 ON disease_relationships(disease_1_id);
+CREATE INDEX idx_relationships_disease2 ON disease_relationships(disease_2_id);
+CREATE INDEX idx_relationships_odds_ratio ON disease_relationships(odds_ratio);
+
+-- Table 3: Prevalence by Demographics (for more detailed queries)
+CREATE TABLE prevalence_stratified (
+    id SERIAL PRIMARY KEY,
+    disease_id INTEGER REFERENCES diseases(id),
+    sex VARCHAR(10),
+    age_group VARCHAR(20),
+    year VARCHAR(10),
+    prevalence DECIMAL(10,8),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_prevalence_disease ON prevalence_stratified(disease_id);
+CREATE INDEX idx_prevalence_demographics ON prevalence_stratified(sex, age_group, year);
+```
+
+DATA IMPORT SCRIPT:
+
+```python
+import pandas as pd
+import psycopg2
+from psycopg2.extras import execute_values
+
+# Database connection
+conn = psycopg2.connect(
+    host="localhost",
+    database="disease_network",
+    user="postgres",
+    password="your_password"
+)
+cur = conn.cursor()
+
+# === Import Diseases ===
+
+diseases_df = pd.read_csv('Data/processed/diseases_master.csv')
+vectors_df = pd.read_csv('Data/processed/disease_vectors_3d.csv')
+
+# Merge
+diseases_full = diseases_df.merge(vectors_df, on='icd_code')
+
+# Prepare data for insertion
+disease_data = [
+    (
+        row['icd_code'],
+        row['descr_english'],
+        row['descr_german'],
+        row['icd_chapter'],
+        row['chapter_name'],
+        row['avg_prevalence_male'],
+        row['avg_prevalence_female'],
+        row['vector_x'],
+        row['vector_y'],
+        row['vector_z']
+    )
+    for _, row in diseases_full.iterrows()
+]
+
+# Insert
+execute_values(
+    cur,
+    """
+    INSERT INTO diseases 
+    (icd_code, name_english, name_german, icd_chapter, chapter_name, 
+     prevalence_male, prevalence_female, vector_x, vector_y, vector_z)
+    VALUES %s
+    """,
+    disease_data
+)
+
+conn.commit()
+print(f"Inserted {len(disease_data)} diseases")
+
+# === Import Relationships ===
+
+relationships_df = pd.read_csv('Data/processed/disease_relationships_master.csv')
+
+# Get disease IDs
+cur.execute("SELECT id, icd_code FROM diseases")
+disease_ids = {icd: id for id, icd in cur.fetchall()}
+
+# Prepare relationship data
+relationship_data = [
+    (
+        disease_ids[row['disease_1_code']],
+        disease_ids[row['disease_2_code']],
+        row['odds_ratio'],
+        row['p_value'],
+        row['patient_count']
+    )
+    for _, row in relationships_df.iterrows()
+    if row['disease_1_code'] in disease_ids and row['disease_2_code'] in disease_ids
+]
+
+# Insert
+execute_values(
+    cur,
+    """
+    INSERT INTO disease_relationships 
+    (disease_1_id, disease_2_id, odds_ratio, p_value, patient_count)
+    VALUES %s
+    ON CONFLICT (disease_1_id, disease_2_id) DO NOTHING
+    """,
+    relationship_data
+)
+
+conn.commit()
+print(f"Inserted {len(relationship_data)} relationships")
+
+# === Import Stratified Prevalence ===
+
+prevalence_df = pd.read_csv('Data/1.Prevalence/Prevalence_Sex_Age_Year_ICD.csv')
+
+prevalence_data = [
+    (
+        disease_ids.get(row['icd_code']),
+        row['sex'],
+        row['Age_Group'],
+        row['year'],
+        row['p']
+    )
+    for _, row in prevalence_df.iterrows()
+    if row['icd_code'] in disease_ids
+]
+
+execute_values(
+    cur,
+    """
+    INSERT INTO prevalence_stratified 
+    (disease_id, sex, age_group, year, prevalence)
+    VALUES %s
+    """,
+    prevalence_data
+)
+
+conn.commit()
+print(f"Inserted {len(prevalence_data)} prevalence records")
+
+# Verify
+cur.execute("SELECT COUNT(*) FROM diseases")
+print(f"Total diseases in DB: {cur.fetchone()[0]}")
+
+cur.execute("SELECT COUNT(*) FROM disease_relationships")
+print(f"Total relationships in DB: {cur.fetchone()[0]}")
+
+cur.close()
+conn.close()
+```
+
+VERIFICATION QUERIES:
+
+```sql
+-- Test query 1: Get disease details
+SELECT * FROM diseases WHERE icd_code = 'E11';
+
+-- Test query 2: Get related diseases
+SELECT 
+    d2.icd_code,
+    d2.name_english,
+    dr.odds_ratio,
+    dr.patient_count
+FROM disease_relationships dr
+JOIN diseases d1 ON dr.disease_1_id = d1.id
+JOIN diseases d2 ON dr.disease_2_id = d2.id
+WHERE d1.icd_code = 'E11'
+ORDER BY dr.odds_ratio DESC
+LIMIT 10;
+
+-- Test query 3: Diseases by chapter
+SELECT icd_chapter, COUNT(*) 
+FROM diseases 
+GROUP BY icd_chapter 
+ORDER BY icd_chapter;
+```
+
+OUTPUT FILES:
+/database/schema.sql
+/database/import_data.py
+/database/verify_import.sql
+/database/backup/initial_data_dump.sql
+
+SUCCESS CRITERIA:
+✓ Database schema created
+✓ All 1080 diseases imported
+✓ All relationships imported
+✓ Verification queries return expected results
+✓ Initial backup created
+
+
+────────────────────────────────────────────────────────────
+MODULE 2.2: API DEVELOPMENT
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-002
+ASSIGNED TO: Backend Developer
+ESTIMATED TIME: 10 hours
+DEPENDENCIES: BACKEND-001
+DELIVERABLE: RESTful API
+
+(Same as original, but with adjusted database queries)
+
+ADDITIONAL ENDPOINT:
+
+```javascript
+// GET /api/network/stratified
+// Parameters: sex, age_group, year
+// Returns: Network specific to demographics
+
+app.get('/api/network/stratified', async (req, res) => {
+  const { sex, age_group, year } = req.query;
+  
+  // Get diseases with stratified prevalence
+  const diseases = await db.query(`
+    SELECT DISTINCT
+      d.id, d.icd_code, d.name_english, d.vector_x, d.vector_y, d.vector_z,
+      ps.prevalence
+    FROM diseases d
+    LEFT JOIN prevalence_stratified ps ON d.id = ps.disease_id
+    WHERE ps.sex = $1 AND ps.age_group = $2 AND ps.year = $3
+    ORDER BY ps.prevalence DESC
+  `, [sex, age_group, year]);
+  
+  // Get relationships
+  const relationships = await db.query(`
+    SELECT 
+      dr.disease_1_id, dr.disease_2_id, dr.odds_ratio
+    FROM disease_relationships dr
+    WHERE dr.disease_1_id IN (SELECT id FROM diseases)
+    AND dr.disease_2_id IN (SELECT id FROM diseases)
+  `);
+  
+  res.json({
+    nodes: diseases.rows,
+    edges: relationships.rows
+  });
+});
+```
+
+(Rest is same as original Module 2.2)
+
+
+────────────────────────────────────────────────────────────
+MODULE 2.3: RISK CALCULATION ENGINE
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-003
+ASSIGNED TO: ML Engineer
+ESTIMATED TIME: 16 hours
+DEPENDENCIES: BACKEND-001
+DELIVERABLE: Risk calculation algorithm
+
+(Same as original Module 2.4, adapted to use database)
+
+Key change: Pull base prevalence from database instead of calculating it.
+
+```python
+def get_base_prevalence(disease_id, user_age, user_sex):
+    # Query database for prevalence specific to user demographics
+    query = """
+        SELECT prevalence 
+        FROM prevalence_stratified 
+        WHERE disease_id = %s 
+        AND sex = %s 
+        AND age_group = %s
+        ORDER BY year DESC
+        LIMIT 1
+    """
+    result = db.execute(query, (disease_id, user_sex, user_age))
+    
+    if result:
+        return result[0]['prevalence']
+    else:
+        # Fallback to overall prevalence
+        query2 = """
+            SELECT 
+                CASE 
+                    WHEN %s = 'male' THEN prevalence_male 
+                    ELSE prevalence_female 
+                END as prevalence
+            FROM diseases 
+            WHERE id = %s
+        """
+        result2 = db.execute(query2, (user_sex, disease_id))
+        return result2[0]['prevalence']
+```
+
+(Rest is same as original)
+
+
+────────────────────────────────────────────────────────────
+MODULE 2.4: NETWORK SELECTION LOGIC
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-004
+ASSIGNED TO: Backend Developer
+ESTIMATED TIME: 6 hours
+DEPENDENCIES: BACKEND-002
+DELIVERABLE: Logic to select appropriate network variant
+
+INSTRUCTIONS:
+You have 82 different network files (stratified by sex, age, year).
+Create logic to select the most appropriate one for a given user.
+
+SELECTION STRATEGY:
+
+```python
+def select_network_for_user(user_age, user_sex, current_year=2024):
+    """
+    Select the most appropriate network variant based on user demographics.
+    
+    Available networks:
+    - By sex: Male, Female
+    - By age group: 1 (0-9), 2 (10-19), 3 (20-29), ..., 8 (70+)
+    - By year: 2003-2004, 2005-2006, ..., 2013-2014
+    """
+    
+    # Map age to age group
+    age_group_map = {
+        range(0, 10): 1,
+        range(10, 20): 2,
+        range(20, 30): 3,
+        range(30, 40): 4,
+        range(40, 50): 5,
+        range(50, 60): 6,
+        range(60, 70): 7,
+        range(70, 150): 8
+    }
+    
+    for age_range, group in age_group_map.items():
+        if user_age in age_range:
+            age_group = group
+            break
+    
+    # Use most recent year period (2013-2014)
+    year_period = "2013-2014"
+    
+    # Sex mapping
+    sex = user_sex.lower()
+    
+    return {
+        "sex": sex,
+        "age_group": age_group,
+        "year_period": year_period,
+        "gexf_file": f"Data/4.Graphs-gexffiles/Graph_{sex.capitalize()}_ICD_age_{age_group}.gexf",
+        "adjacency_file": f"Data/3.AdjacencyMatrices/Adj_Matrix_{sex.capitalize()}_ICD_age_{age_group}.csv"
+    }
+
+# API endpoint
+@app.post('/api/user/select-network')
+def get_user_network(user_data):
+    network_selection = select_network_for_user(
+        user_data['age'],
+        user_data['gender']
+    )
+    
+    # Load the selected network
+    # (Could cache these in memory or database)
+    
+    return network_selection
+```
+
+OPTIMIZATION:
+Instead of loading networks on-demand, pre-load all into database/cache at startup.
+
+```python
+# Startup: Load all GEXF files
+import networkx as nx
+
+network_cache = {}
+
+for sex in ['Male', 'Female']:
+    for age in range(1, 9):
+        key = f"{sex}_{age}"
+        gexf_path = f"Data/4.Graphs-gexffiles/Graph_{sex}_ICD_age_{age}.gexf"
+        
+        try:
+            G = nx.read_gexf(gexf_path)
+            network_cache[key] = {
+                "nodes": list(G.nodes(data=True)),
+                "edges": list(G.edges(data=True))
+            }
+        except:
+            print(f"Warning: Could not load {gexf_path}")
+
+print(f"Loaded {len(network_cache)} networks into cache")
+```
+
+OUTPUT FILES:
+/api/network_selector.py
+/api/network_cache.py
+/tests/test_network_selection.py
+
+SUCCESS CRITERIA:
+✓ Correct network selected for any user demographics
+✓ All 82 networks can be loaded
+✓ Network selection is fast (<50ms)
+
+
+============================================================
+PHASE 3-5: FRONTEND, INTEGRATION, DEPLOYMENT
+============================================================
+
+These phases remain largely the same as the original breakdown, with these key adjustments:
+
+FRONTEND CHANGES:
+- Module 3.2 can use GEXF files directly (NetworkX to Three.js conversion)
+- Simpler data transformation (GEXF already has node positions if available)
+
+INTEGRATION CHANGES:
+- Module 4.1: API calls include network selection based on user demographics
+- Data transformation simpler (GEXF → visualization format)
+
+TESTING CHANGES:
+- Module 4.2: Add tests for demographic-based network selection
+- Verify different networks load for different user profiles
+
+(Full details same as original document)
+
+
+============================================================
+REVISED TASK DEPENDENCY GRAPH
+============================================================
+
+Level 1 (Start immediately):
+- DATA-002: Translate descriptions (independent)
+- FRONTEND-003: UI/UX Design (independent)
+
+Level 2:
+- DATA-001: Extract .rds data
+- FRONTEND-001: User Input Form
+- FRONTEND-002: 3D Visualization (with mock data)
+
+Level 3:
+- DATA-003: Create master database (after DATA-001, DATA-002)
+
+Level 4:
+- DATA-004: Generate 3D embeddings (after DATA-003)
+- BACKEND-001: Database schema (after DATA-003)
+
+Level 5:
+- BACKEND-002: API Development (after BACKEND-001, DATA-004)
+- BACKEND-004: Network selection (after BACKEND-001)
+
+Level 6:
+- BACKEND-003: Risk calculation (after BACKEND-002)
+- FRONTEND-004: Dashboard (after FRONTEND-001, 002, 003)
+
+Level 7:
+- INTEGRATION-001: Connect frontend to backend
+
+Level 8:
+- INTEGRATION-002: Testing
+- INTEGRATION-003: Performance
+
+Level 9:
+- DEPLOY-001, 002, 003: Deployment
+
+
+============================================================
+KEY ADVANTAGES WITH AUSTRIAN DATASET
+============================================================
+
+✓ Pre-computed networks save 2-3 weeks of ML work
+✓ Multiple stratifications enable personalized networks
+✓ GEXF files can be used directly for visualization
+✓ Statistical rigor already validated (published research)
+✓ Large patient cohort (8.9M) ensures reliability
+
+SIMPLIFIED TIMELINE: 6-8 weeks (down from 8-12)
+
+
+============================================================
+END OF UPDATED DOCUMENT
+============================================================

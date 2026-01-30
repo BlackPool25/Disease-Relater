@@ -1,2 +1,5 @@
 Data
 Comorbidity-Networks-From-Population-Wide-Health-Data
+data
+*.log
+__pycache__
