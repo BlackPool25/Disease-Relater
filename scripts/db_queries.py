@@ -95,7 +95,7 @@ class DatabaseQueries:
             return None
 
         query = """
-            SELECT 
+            SELECT
                 d.id,
                 d.icd_code,
                 d.name_english,
@@ -115,7 +115,7 @@ class DatabaseQueries:
                 d.updated_at
             FROM diseases d
             LEFT JOIN icd_chapters c ON d.chapter_code = c.chapter_code
-            WHERE d.icd_code = %s
+            WHERE d.icd_code = %(icd_code)s
         """
 
         results = self._execute_query(query, {"icd_code": icd_code})
@@ -478,6 +478,7 @@ class DatabaseQueries:
         Utility: Search diseases by name or code.
 
         Full-text search across disease names and codes.
+        Uses parameterized queries to prevent SQL injection.
 
         Args:
             search_term: Search string
@@ -488,24 +489,41 @@ class DatabaseQueries:
         Returns:
             List of matching disease records
         """
-        if not search_term or len(search_term) < 2:
+        # Validate inputs
+        if not search_term or len(search_term.strip()) < 2:
             return []
 
-        params = {"search_term": f"%{search_term}%", "limit": min(limit, 100)}
+        # Sanitize and validate limit
+        try:
+            limit_val = min(int(limit), 100)
+            if limit_val < 1:
+                limit_val = 20
+        except (ValueError, TypeError):
+            limit_val = 20
 
-        conditions = []
+        # Build query dynamically but safely (conditions are hardcoded, not user input)
+        params: Dict[str, Any] = {
+            "search_term": f"%{search_term.strip()}%",
+            "limit": limit_val,
+        }
+
+        # Build WHERE clause based on search options
+        where_clauses = []
         if search_in_names:
-            conditions.append(
+            where_clauses.append(
                 "(d.name_english ILIKE %(search_term)s OR d.name_german ILIKE %(search_term)s)"
             )
         if search_in_codes:
-            conditions.append("d.icd_code ILIKE %(search_term)s")
+            where_clauses.append("d.icd_code ILIKE %(search_term)s")
 
-        if not conditions:
+        if not where_clauses:
             return []
 
+        # Use safe string joining for WHERE clause (no user input in conditions)
+        where_clause = " OR ".join(where_clauses)
+
         query = f"""
-            SELECT 
+            SELECT
                 d.id,
                 d.icd_code,
                 d.name_english,
@@ -516,7 +534,7 @@ class DatabaseQueries:
                 d.has_english_name
             FROM diseases d
             LEFT JOIN icd_chapters c ON d.chapter_code = c.chapter_code
-            WHERE {" OR ".join(conditions)}
+            WHERE {where_clause}
             ORDER BY d.icd_code
             LIMIT %(limit)s
         """

@@ -28,6 +28,26 @@ Disease-Relater/
 │   │   ├── 3_Net_Properties.R              # Network analysis and metrics
 │   │   └── Example_PythonScript.ipynb      # Python example notebook
 │   └── README.md                           # R pipeline documentation
+├── api/                                    # FastAPI REST API
+│   ├── main.py                             # FastAPI application entry point (Agent 1)
+│   ├── config.py                           # Pydantic settings & env validation
+│   ├── dependencies.py                     # Dependency injection (Supabase client)
+│   ├── validation.py                       # Input validation (ICD codes, etc.)
+│   ├── routes/
+│   │   ├── health.py                       # Health check endpoints (Agent 1)
+│   │   ├── calculate.py                    # Risk calculator endpoint (Agent 3)
+│   │   └── __init__.py
+│   ├── services/
+│   │   ├── risk_calculator.py              # Risk calculation logic (Agent 3)
+│   │   └── __init__.py
+│   ├── schemas/
+│   │   ├── calculate.py                    # Risk calculator Pydantic models (Agent 3)
+│   │   └── __init__.py
+│   ├── middleware/
+│   │   ├── error_handlers.py               # Custom exception handlers
+│   │   └── __init__.py
+│   ├── types.ts                            # TypeScript type definitions
+│   └── endpoints.md                        # API documentation
 ├── scripts/                                # Python data cleaning & embeddings
 │   ├── data_cleaning.py                    # Core cleaning module
 │   ├── run_cleaning.py                     # CLI entry point
@@ -36,10 +56,15 @@ Disease-Relater/
 │   ├── generate_3d_embeddings.py           # Generate 3D disease coordinates (Module 1.4)
 │   ├── validate_data.py                    # Pre-import data validation (Module 1.5)
 │   ├── import_to_database.py               # PostgreSQL/Supabase import (Module 1.5)
+│   ├── db_queries.py                       # Database query functions
 │   ├── demo_3d_embeddings.py               # Demo script for testing embeddings
 │   └── export_contingency_tables.R         # R export script (required)
+├── tests/                                  # Unit and integration tests
+│   ├── __init__.py
+│   └── test_risk_calculator.py             # Risk calculator tests (Agent 3)
 ├── requirements.txt                        # Python dependencies
 ├── pyproject.toml                          # Modern Python project config
+├── .env.example                            # Environment variable template
 ├── README.md                               # This file
 └── README_DATA_CLEANING.md                 # Python pipeline details
 ```
@@ -355,7 +380,47 @@ source("Scripts/2_Make_NET_Chronic.R")
 source("Scripts/3_Net_Properties.R")
 ```
 
-### 5. Complete Workflow
+### 5. FastAPI Server (New)
+
+Run the FastAPI server for REST API access to disease data and comorbidity networks.
+
+```bash
+# 1. Set up environment variables
+cp .env.example .env
+# Edit .env with your Supabase credentials
+
+# 2. Start the development server
+uvicorn api.main:app --reload --port 5000
+
+# 3. Test the health endpoint
+curl http://localhost:5000/api/health
+```
+
+**Available Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | API info |
+| GET | `/api` | Available endpoints |
+| GET | `/api/health` | Health check |
+| GET | `/api/ready` | Readiness probe (K8s) |
+| GET | `/api/live` | Liveness probe (K8s) |
+| GET | `/docs` | API documentation (Swagger) |
+
+**Configuration:**
+
+Server settings are loaded from environment variables (see `.env.example`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SUPABASE_URL` | Required | Supabase project URL |
+| `SUPABASE_KEY` | Required | Supabase API key |
+| `HOST` | 0.0.0.0 | Server bind host |
+| `PORT` | 5000 | Server port |
+| `CORS_ORIGINS` | localhost | Allowed origins |
+| `DEBUG` | false | Debug mode |
+
+### 6. Complete Workflow
 
 ```bash
 # 1. Set up environment
@@ -387,6 +452,9 @@ python scripts/validate_data.py --data-dir Data/processed --verbose --exit-on-er
 export SUPABASE_URL="postgresql://user:pass@host:5432/database"
 export SUPABASE_KEY="your-service-role-key"
 python scripts/import_to_database.py --validate-first --verbose
+
+# 10. Start the FastAPI server
+uvicorn api.main:app --reload --port 5000
 ```
 
 ## Data Requirements
@@ -603,6 +671,164 @@ curl 'https://gbohehihcncmlcpyxomv.supabase.co/rest/v1/diseases?icd_code=eq.E11'
 ```
 
 See `api/endpoints.md` for complete documentation.
+
+### FastAPI Server
+
+Self-hosted FastAPI server with improved query capabilities:
+
+**Installation:**
+```bash
+# Using uv (recommended)
+uv pip install -r requirements.txt
+
+# Or with pip
+pip install fastapi uvicorn pydantic supabase
+```
+
+**Run the server:**
+```bash
+# Set environment variables
+cp .env.example .env
+# Edit .env with your Supabase credentials
+
+# Start server
+uvicorn api.main:app --host 0.0.0.0 --port 5000 --reload
+
+# Or using Python
+python api/main.py
+```
+
+**GET Endpoints:**
+
+| Method | Endpoint | Description | Query Parameters |
+|--------|----------|-------------|------------------|
+| GET | `/api/diseases` | List diseases | `chapter`, `limit`, `offset` |
+| GET | `/api/diseases/{id}` | Get disease by ID or ICD | - |
+| GET | `/api/diseases/{id}/related` | Get related diseases | `limit`, `min_odds_ratio` |
+| GET | `/api/diseases/search/{term}` | Search diseases | `limit` |
+| GET | `/api/network` | Get network data | `min_odds_ratio`, `max_edges`, `chapter_filter` |
+| GET | `/api/chapters` | List ICD chapters | - |
+
+**Examples:**
+```bash
+# List diseases with chapter filter
+curl "http://localhost:5000/api/diseases?chapter=IX&limit=10"
+
+# Get disease by ICD code
+curl "http://localhost:5000/api/diseases/E11"
+
+# Get related diseases
+curl "http://localhost:5000/api/diseases/E11/related?limit=10&min_odds_ratio=5.0"
+
+# Search diseases
+curl "http://localhost:5000/api/diseases/search/diabetes?limit=5"
+
+# Get network data
+curl "http://localhost:5000/api/network?min_odds_ratio=5.0&chapter_filter=IX"
+
+# List chapters
+curl "http://localhost:5000/api/chapters"
+```
+
+### Risk Calculator API
+
+**Endpoint:** `POST /api/calculate-risk`
+
+Calculate personalized disease risk scores based on existing conditions and demographics.
+
+**Request Body:**
+```json
+{
+  "age": 45,
+  "gender": "male",
+  "bmi": 28.5,
+  "existing_conditions": ["E11", "I10"],
+  "exercise_level": "moderate",
+  "smoking": false
+}
+```
+
+**Request Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `age` | integer | Yes | Age in years (0-120) |
+| `gender` | string | Yes | "male" or "female" |
+| `bmi` | float | Yes | Body Mass Index (0-100) |
+| `existing_conditions` | array | Yes | List of ICD-10 codes (1-50 items) |
+| `exercise_level` | string | Yes | "sedentary", "light", "moderate", "active" |
+| `smoking` | boolean | Yes | Current smoking status |
+
+**Response:**
+```json
+{
+  "risk_scores": [
+    {
+      "disease_id": "E13",
+      "disease_name": "Other specified diabetes",
+      "risk": 0.8234,
+      "level": "very_high",
+      "contributing_factors": [
+        "Odds ratio: 15.50 from E11",
+        "Very strong relationship",
+        "Elevated BMI (overweight)",
+        "Middle age"
+      ]
+    }
+  ],
+  "user_position": {
+    "x": 0.2341,
+    "y": -0.1452,
+    "z": 0.6789
+  },
+  "total_conditions_analyzed": 2,
+  "analysis_metadata": {
+    "conditions_processed": ["E11", "I10"],
+    "related_diseases_found": 15,
+    "gender": "male",
+    "age": 45
+  }
+}
+```
+
+**Risk Levels:**
+
+| Level | Score Range | Description |
+|-------|-------------|-------------|
+| `low` | 0.00 - 0.24 | Minimal risk |
+| `moderate` | 0.25 - 0.49 | Moderate risk |
+| `high` | 0.50 - 0.74 | High risk |
+| `very_high` | 0.75 - 1.00 | Very high risk |
+
+**Example Request:**
+```bash
+curl -X POST "http://localhost:5000/api/calculate-risk" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "age": 45,
+    "gender": "male",
+    "bmi": 28.5,
+    "existing_conditions": ["E11", "I10"],
+    "exercise_level": "moderate",
+    "smoking": false
+  }'
+```
+
+**Algorithm Overview:**
+
+1. **Base Risk Calculation:** Converts odds ratios from comorbidity relationships to probability-like scores (0-1 range)
+2. **Demographic Modifiers:**
+   - BMI: Overweight (+0.05), Obese (+0.10)
+   - Smoking: +0.15 to all risks
+   - Exercise: Sedentary (+0.05), Active (-0.05)
+   - Age: Elderly 65+ (+0.10), Middle 45+ (+0.05)
+3. **User Position:** Weighted average of 3D disease coordinates using prevalence as weights
+
+**Files:**
+- `api/routes/calculate.py` - FastAPI endpoint
+- `api/services/risk_calculator.py` - Calculation logic
+- `api/schemas/calculate.py` - Pydantic models
+- `tests/test_risk_calculator.py` - Unit tests
 
 ### TypeScript Types
 
