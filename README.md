@@ -34,6 +34,8 @@ Disease-Relater/
 │   ├── translate_descriptions.py          # ICD-10 German→English translation (Module 1.2)
 │   ├── create_master_database.py           # Create unified master databases (Module 1.3)
 │   ├── generate_3d_embeddings.py           # Generate 3D disease coordinates (Module 1.4)
+│   ├── validate_data.py                    # Pre-import data validation (Module 1.5)
+│   ├── import_to_database.py               # PostgreSQL/Supabase import (Module 1.5)
 │   ├── demo_3d_embeddings.py               # Demo script for testing embeddings
 │   └── export_contingency_tables.R         # R export script (required)
 ├── requirements.txt                        # Python dependencies
@@ -208,7 +210,116 @@ Test the embedding pipeline with synthetic data:
 python scripts/demo_3d_embeddings.py
 ```
 
-### 3. R Network Analysis Pipeline
+### 3. Database Import Pipeline (Module 1.5)
+
+Import processed data into PostgreSQL/Supabase for production use. The import handles data merging and preserves all 1,080 ICD codes.
+
+**Prerequisites**: Data validation and cleaning must be complete.
+
+#### Data Validation
+
+Validate all CSV files before import to check for corruption and discrepancies:
+
+```bash
+# Basic validation
+python scripts/validate_data.py
+
+# Detailed validation with discrepancy analysis
+python scripts/validate_data.py --verbose --exit-on-error
+
+# Validate specific directory
+python scripts/validate_data.py --data-dir /path/to/processed/data
+```
+
+**What validation checks:**
+- File existence and non-empty
+- Required columns present
+- Data types valid (numeric columns contain numbers)
+- No extreme outliers (possible corruption)
+- Data discrepancies between datasets (736 vs 1,080 diseases)
+
+**Data Discrepancy Handling:**
+The validation will report:
+- `diseases_master.csv`: 736 diseases with names, chapters, prevalence
+- `disease_vectors_3d.csv`: 1,080 diseases with 3D coordinates
+- Overlap: ~569 diseases in both files
+
+The import script automatically merges these with an outer join to preserve all 1,080 ICD codes.
+
+#### Database Import
+
+Import validated data into PostgreSQL:
+
+```bash
+# Set environment variables
+export SUPABASE_URL="postgresql://user:pass@host:5432/database"
+export SUPABASE_KEY="your-service-role-key"
+
+# Run import with pre-validation
+python scripts/import_to_database.py --validate-first --verbose
+
+# Import without validation (if already validated)
+python scripts/import_to_database.py
+
+# Custom batch size for large imports
+python scripts/import_to_database.py --batch-size 500
+```
+
+**Environment Variables:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SUPABASE_URL` | Yes | PostgreSQL connection URL |
+| `SUPABASE_KEY` | Yes | Service role key for authentication |
+| `DB_PASSWORD` | No | Password if not in URL |
+
+**Database Import:**
+
+Import processed data into Supabase using the unified import script:
+
+1. **Setup credentials:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your Supabase credentials from:
+   # https://supabase.com/dashboard/project/gbohehihcncmlcpyxomv/settings/database
+   ```
+
+2. **Run the import:**
+   ```bash
+   source .venv/bin/activate
+   python scripts/run_full_import.py
+   ```
+
+**Import Process:**
+
+The script imports three datasets with proper foreign key relationships:
+
+1. **diseases** - Master disease catalog (1,247 rows)
+   - Merges `diseases_master.csv` (736) + `disease_vectors_3d.csv` (1,080)
+   - Uses outer join to preserve all 1,080 ICD codes with 3D coordinates
+   - Fields: `icd_code`, `name_english`, `name_german`, `chapter_code`, `granularity`, prevalence, 3D vectors
+
+2. **disease_relationships** - Aggregated comorbidity pairs (9,232 rows)
+   - From `disease_relationships_master.csv`
+   - Foreign keys to diseases table
+   - Fields: `odds_ratio`, `p_value`, `patient_count_total`, ICD chapters
+
+3. **disease_relationships_stratified** - Detailed stratified pairs (74,901 rows)
+   - From `disease_pairs_clean.csv`
+   - Sex, age group, year stratifications
+   - Individual odds ratios and p-values per stratum
+
+**Verification:**
+
+The script automatically verifies row counts after import:
+```
+diseases: 1,247 rows
+disease_relationships: 9,232 rows
+disease_relationships_stratified: 74,901 rows
+icd_chapters: 21 rows
+```
+
+### 4. R Network Analysis Pipeline
 
 The R scripts generate comorbidity networks from contingency tables.
 
@@ -244,7 +355,7 @@ source("Scripts/2_Make_NET_Chronic.R")
 source("Scripts/3_Net_Properties.R")
 ```
 
-### 3. Complete Workflow
+### 5. Complete Workflow
 
 ```bash
 # 1. Set up environment
@@ -260,11 +371,22 @@ Rscript scripts/export_contingency_tables.R
 # 4. Run Python cleaning pipeline
 python scripts/run_cleaning.py --data-dir Data --output-dir data/processed --translate
 
-# 5. Run R analysis pipeline to generate adjacency matrices
+# 5. Create master databases (merges all data sources)
+python scripts/create_master_database.py
+
+# 6. Run R analysis pipeline to generate adjacency matrices
 Rscript -e "setwd('Comorbidity-Networks-From-Population-Wide-Health-Data'); source('Scripts/1_Make_AdjMatrix_ICD.R')"
 
-# 6. Generate 3D embeddings for visualization
+# 7. Generate 3D embeddings for visualization
 python scripts/generate_3d_embeddings.py --method umap --data-dir Data --output-dir data/processed
+
+# 8. Validate data before database import
+python scripts/validate_data.py --data-dir Data/processed --verbose --exit-on-error
+
+# 9. Import into PostgreSQL/Supabase database
+export SUPABASE_URL="postgresql://user:pass@host:5432/database"
+export SUPABASE_KEY="your-service-role-key"
+python scripts/import_to_database.py --validate-first --verbose
 ```
 
 ## Data Requirements
@@ -347,6 +469,16 @@ Spring Layout (via `embed_spring_layout()`):
 - `k`: Optimal distance between nodes (default: 0.5)
 - `iterations`: Convergence iterations (default: 100)
 
+### Database Import Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--data-dir` | `Data/processed` | Directory containing CSV files |
+| `--validate-first` | `False` | Run validation before import |
+| `--skip-stratified` | `False` | Skip stratified prevalence import |
+| `--batch-size` | `1000` | Rows per insert batch |
+| `--verbose` | `False` | Detailed logging output |
+
 ## Output Files
 
 ### Python Pipeline Outputs
@@ -369,6 +501,23 @@ Spring Layout (via `embed_spring_layout()`):
 - `icd_code`: Disease identifier
 - `vector_x`, `vector_y`, `vector_z`: 3D coordinates (normalized to [-1, 1])
 
+**Master Database Files (in `Data/processed/`):**
+
+**diseases_master.csv** (Module 1.3):
+- 736 diseases with names, chapters, and prevalence rates
+- `icd_code`, `name_english`, `name_german`, `chapter_code`, `chapter_name`
+- `granularity` (ICD/Blocks/Chronic)
+- `avg_prevalence_male`, `avg_prevalence_female`
+
+**disease_relationships_master.csv** (Module 1.3):
+- 9,232 aggregated disease relationships
+- `disease_1_code`, `disease_2_code`, `odds_ratio_avg`, `p_value_avg`
+- `patient_count_total`, `icd_chapter_1`, `icd_chapter_2`
+
+**data_summary.json** (Module 1.3):
+- Statistics summary of all processed data
+- Row counts, column names, data quality metrics
+
 **3D Embedding Validation:**
 - `Data/validation/3d_embedding_visualization.png` - 3D scatter plot colored by ICD chapter
 - `Data/validation/embedding_quality_report.txt` - Clustering quality metrics
@@ -383,6 +532,118 @@ Spring Layout (via `embed_spring_layout()`):
 
 **Visualizations:**
 - PNG plots of network properties and distributions
+
+## Database & API
+
+### Supabase Database
+
+The project uses Supabase PostgreSQL for storing and serving disease data.
+
+**Database URL:** `https://gbohehihcncmlcpyxomv.supabase.co`
+
+**Tables:**
+- `diseases` - 1,080 ICD codes with names, prevalence, and 3D coordinates
+- `disease_relationships` - 9,232 aggregated comorbidity relationships
+- `disease_relationships_stratified` - 74,901 detailed relationships by sex/age/year
+- `icd_chapters` - 21 standard ICD-10 chapters
+
+**Views:**
+- `diseases_complete` - Full disease metadata with chapter names
+- `top_relationships` - Top comorbidities ranked by odds ratio
+- `disease_network_stats` - Connection counts and network metrics
+
+**Functions:**
+- `search_diseases('diabetes')` - Search by name
+- `get_connected_diseases('E11')` - Get related diseases
+
+### Query Module
+
+Use the Python query module for database access:
+
+```python
+from scripts.db_queries import DatabaseQueries
+from supabase import create_client
+
+# Initialize client
+supabase = create_client(url, key)
+db = DatabaseQueries(supabase)
+
+# 5 core query functions
+disease = db.get_disease_by_code('E11')                          # Query 1
+diseases = db.get_diseases_by_chapter('IX', limit=50)           # Query 2
+related = db.get_related_diseases('E11', limit=20)              # Query 3
+network = db.get_network_data(min_odds_ratio=5.0)               # Query 4
+prevalence = db.get_prevalence_for_demographics('E11', 'Female') # Query 5
+
+# Utility functions
+results = db.search_diseases('diabetes', limit=10)
+stats = db.get_disease_statistics()
+chapters = db.get_chapter_statistics()
+```
+
+See `scripts/db_queries.py` for full documentation.
+
+### REST API
+
+**Base URL:** `https://gbohehihcncmlcpyxomv.supabase.co/rest/v1/`
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/diseases` | List all diseases |
+| GET | `/diseases?icd_code=eq.{code}` | Get disease by ICD code |
+| GET | `/diseases?chapter_code=eq.{chapter}` | Get diseases by chapter |
+| GET | `/disease_relationships` | Get related diseases |
+| GET | `/diseases_complete` | Full disease data |
+| GET | `/top_relationships` | Top comorbidities |
+
+**Example:**
+```bash
+curl 'https://gbohehihcncmlcpyxomv.supabase.co/rest/v1/diseases?icd_code=eq.E11' \
+  -H 'apikey: <your-api-key>'
+```
+
+See `api/endpoints.md` for complete documentation.
+
+### TypeScript Types
+
+Generated types for frontend development:
+
+```typescript
+// api/types.ts
+import { Disease, DiseaseRelationship } from './api/types';
+
+const disease: Disease = {
+  id: 1,
+  icd_code: 'E11',
+  name_english: 'Type 2 diabetes mellitus',
+  // ...
+};
+```
+
+### SQL Reference
+
+Reference queries in `database/queries.sql`:
+
+```sql
+-- Get disease with chapter info
+SELECT d.*, c.chapter_name 
+FROM diseases d
+LEFT JOIN icd_chapters c ON d.chapter_code = c.chapter_code
+WHERE d.icd_code = 'E11';
+
+-- Get top related diseases
+SELECT * FROM get_connected_diseases('E11');
+
+-- Search by name
+SELECT * FROM search_diseases('diabetes');
+```
+
+### Schema Files
+
+- `database/schema.sql` - Complete database schema
+- `database/queries.sql` - Reference SQL queries
+- `api/endpoints.md` - API documentation
+- `api/types.ts` - TypeScript type definitions
 
 ## Development
 

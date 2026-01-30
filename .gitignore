@@ -3,3 +3,17 @@ Comorbidity-Networks-From-Population-Wide-Health-Data
 data
 *.log
 __pycache__
+.env
+venv
+.venv
+.DS_Store
+.vscode
+.idea
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+database
