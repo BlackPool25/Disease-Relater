@@ -5,17 +5,25 @@ Agent 2: GET Endpoints Implementation
 GET endpoint for ICD chapters listing.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from supabase import AsyncClient
 
 from api.dependencies import get_supabase_client
+from api.rate_limit import limiter, get_rate_limit_string
 from api.schemas.diseases import ChapterResponse
 
 router = APIRouter(prefix="/chapters", tags=["chapters"])
 
+# Get rate limit string for decorators
+_rate_limit = get_rate_limit_string()
+
 
 @router.get("", response_model=list[ChapterResponse])
-async def list_chapters(client: AsyncClient = Depends(get_supabase_client)):
+@limiter.limit(_rate_limit)
+async def list_chapters(
+    request: Request,
+    client: AsyncClient = Depends(get_supabase_client),
+):
     """
     Get all ICD chapters with disease counts.
 
@@ -23,17 +31,11 @@ async def list_chapters(client: AsyncClient = Depends(get_supabase_client)):
     average prevalence statistics.
     """
     # Query chapters with disease counts using the view or manual join
-    response = await (
-        client.table("icd_chapters")
-        .select(
-            """
+    response = await client.table("icd_chapters").select("""
             chapter_code,
             chapter_name,
             diseases(count)
-        """
-        )
-        .execute()
-    )
+        """).execute()
 
     if not response.data:
         return []

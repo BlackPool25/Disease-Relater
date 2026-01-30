@@ -6,13 +6,11 @@ and security (prevents information leakage).
 """
 
 import logging
+from typing import Optional
+
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from fastapi.exception_handlers import (
-    http_exception_handler,
-    request_validation_exception_handler,
-)
 
 from api.validation import sanitize_error_message
 
@@ -22,7 +20,9 @@ logger = logging.getLogger(__name__)
 class APIError(Exception):
     """Base class for API-specific errors."""
 
-    def __init__(self, message: str, status_code: int = 500, details: dict = None):
+    def __init__(
+        self, message: str, status_code: int = 500, details: Optional[dict] = None
+    ):
         self.message = message
         self.status_code = status_code
         self.details = details or {}
@@ -32,7 +32,7 @@ class APIError(Exception):
 class ValidationError(APIError):
     """Validation error - invalid input parameters."""
 
-    def __init__(self, message: str, details: dict = None):
+    def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(
             message, status_code=status.HTTP_400_BAD_REQUEST, details=details
         )
@@ -41,7 +41,7 @@ class ValidationError(APIError):
 class NotFoundError(APIError):
     """Resource not found error."""
 
-    def __init__(self, message: str, details: dict = None):
+    def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(
             message, status_code=status.HTTP_404_NOT_FOUND, details=details
         )
@@ -50,7 +50,7 @@ class NotFoundError(APIError):
 class DatabaseError(APIError):
     """Database query/connection error."""
 
-    def __init__(self, message: str, details: dict = None):
+    def __init__(self, message: str, details: Optional[dict] = None):
         super().__init__(
             message, status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, details=details
         )
@@ -137,3 +137,41 @@ def setup_exception_handlers(app):
                 }
             },
         )
+
+
+def handle_database_operation(func):
+    """Decorator for consistent database error handling.
+
+    Wraps database operations to catch common database errors and convert
+    them to standardized DatabaseError exceptions with appropriate logging.
+
+    Args:
+        func: Async function to wrap
+
+    Returns:
+        Wrapped function with error handling
+
+    Example:
+        @handle_database_operation
+        async def get_disease_by_code(client: AsyncClient, code: str):
+            response = await client.table("diseases") \\
+                .select("*").eq("icd_code", code).execute()
+            return response.data
+    """
+    import functools
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except ConnectionError as e:
+            logger.exception("Database connection failed")
+            raise DatabaseError("Database connection unavailable") from e
+        except TimeoutError as e:
+            logger.exception("Database query timeout")
+            raise DatabaseError("Database request timed out") from e
+        except Exception as e:
+            logger.exception("Database operation failed")
+            raise DatabaseError("Database operation failed") from e
+
+    return wrapper

@@ -6,21 +6,72 @@ network analysis, and 3D visualization coordinates.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from api.config import get_settings
 from api.middleware.error_handlers import setup_exception_handlers
+from api.rate_limit import limiter, get_rate_limit_string
 from api.routes import calculate, chapters, diseases, health, network
+
+# OpenAPI tags metadata for organized API documentation
+tags_metadata = [
+    {
+        "name": "health",
+        "description": (
+            "Health check and monitoring endpoints for service status "
+            "and Kubernetes probes"
+        ),
+    },
+    {
+        "name": "diseases",
+        "description": (
+            "Disease data operations including listing, search, details, "
+            "and related diseases"
+        ),
+    },
+    {
+        "name": "network",
+        "description": (
+            "Network visualization data with 3D coordinates and "
+            "comorbidity relationships"
+        ),
+    },
+    {
+        "name": "chapters",
+        "description": "ICD-10 chapter listings with disease counts and statistics",
+    },
+    {
+        "name": "risk-calculation",
+        "description": (
+            "Personalized disease risk calculation based on demographics "
+            "and existing conditions"
+        ),
+    },
+]
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# Add rotating file handler for error logging
+os.makedirs("logs", exist_ok=True)
+file_handler = RotatingFileHandler("logs/api.log", maxBytes=10_000_000, backupCount=5)
+file_handler.setLevel(logging.ERROR)
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+logging.getLogger().addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,8 +126,25 @@ def create_application() -> FastAPI:
         - 9,232 aggregated relationships
         - 74,901 stratified relationships
         - 3D embeddings for network visualization
+        
+        ## Documentation
+        
+        - Full API documentation: see API_DOCUMENTATION.md
+        - OpenAPI schema: /openapi.json (dev mode only)
+        - Swagger UI: /docs (dev mode only)
+        - ReDoc: /redoc (dev mode only)
         """,
         version=settings.app_version,
+        contact={
+            "name": "Disease Relater Team",
+            "email": "support@disease-relater.example.com",
+            "url": "https://github.com/anomalyco/disease-relater/issues",
+        },
+        license_info={
+            "name": "MIT License",
+            "identifier": "MIT",
+        },
+        openapi_tags=tags_metadata,
         docs_url="/docs" if settings.debug else None,
         redoc_url="/redoc" if settings.debug else None,
         openapi_url="/openapi.json" if settings.debug else None,
@@ -85,6 +153,11 @@ def create_application() -> FastAPI:
 
     # Setup exception handlers
     setup_exception_handlers(app)
+
+    # Add rate limiting middleware
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
     # Add CORS middleware
     app.add_middleware(
@@ -105,9 +178,12 @@ def create_application() -> FastAPI:
     app.include_router(chapters.router, prefix="/api", tags=["chapters"])
     app.include_router(calculate.router, prefix="/api", tags=["risk-calculation"])
 
-    # Root endpoint
+    # Root endpoint with rate limiting
+    rate_limit = get_rate_limit_string()
+
     @app.get("/")
-    async def root():
+    @limiter.limit(rate_limit)
+    async def root(request: Request):
         """API root endpoint with basic information."""
         return {
             "name": settings.app_name,
@@ -119,7 +195,8 @@ def create_application() -> FastAPI:
 
     # API info endpoint
     @app.get("/api")
-    async def api_info():
+    @limiter.limit(rate_limit)
+    async def api_info(request: Request):
         """API information and available endpoints."""
         return {
             "name": settings.app_name,

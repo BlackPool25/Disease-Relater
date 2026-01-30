@@ -2,11 +2,11 @@
 Risk Calculation API Schemas
 
 Pydantic models for the POST /api/calculate-risk endpoint.
-Defines request and response validation schemas.
+Defines request and response validation schemas with examples.
 """
 
 from typing import Literal, List
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class RiskCalculationRequest(BaseModel):
@@ -15,11 +15,11 @@ class RiskCalculationRequest(BaseModel):
     Contains user demographic data and existing conditions for risk assessment.
     """
 
-    age: int = Field(ge=0, le=120, description="User age in years")
+    age: int = Field(ge=1, le=120, description="Age in years (1-120)")
     gender: Literal["male", "female"] = Field(
         description="User gender for prevalence stratification"
     )
-    bmi: float = Field(gt=0, le=100, description="Body Mass Index")
+    bmi: float = Field(ge=10.0, le=60.0, description="Body Mass Index (10-60)")
     existing_conditions: List[str] = Field(
         description="List of ICD-10 codes for existing conditions",
         min_length=1,
@@ -46,6 +46,19 @@ class RiskCalculationRequest(BaseModel):
 
         return v
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "age": 45,
+                "gender": "male",
+                "bmi": 28.5,
+                "existing_conditions": ["E11", "I10"],
+                "exercise_level": "moderate",
+                "smoking": False,
+            }
+        }
+    )
+
 
 class RiskScore(BaseModel):
     """Individual disease risk score model.
@@ -65,6 +78,18 @@ class RiskScore(BaseModel):
         default_factory=list, description="Factors that contributed to this risk score"
     )
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "disease_id": "N18",
+                "disease_name": "Chronic kidney disease",
+                "risk": 0.72,
+                "level": "high",
+                "contributing_factors": ["existing:E11", "existing:I10"],
+            }
+        }
+    )
+
 
 class UserPosition(BaseModel):
     """User's position in 3D disease space.
@@ -75,6 +100,10 @@ class UserPosition(BaseModel):
     x: float = Field(description="X coordinate in 3D space")
     y: float = Field(description="Y coordinate in 3D space")
     z: float = Field(description="Z coordinate in 3D space")
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"x": -0.145, "y": 0.398, "z": -0.067}}
+    )
 
 
 class RiskCalculationResponse(BaseModel):
@@ -94,4 +123,33 @@ class RiskCalculationResponse(BaseModel):
     )
     analysis_metadata: dict = Field(
         default_factory=dict, description="Additional analysis metadata"
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "risk_scores": [
+                    {
+                        "disease_id": "N18",
+                        "disease_name": "Chronic kidney disease",
+                        "risk": 0.72,
+                        "level": "high",
+                        "contributing_factors": ["existing:E11", "existing:I10"],
+                    },
+                    {
+                        "disease_id": "E78",
+                        "disease_name": "Disorders of lipoprotein metabolism",
+                        "risk": 0.45,
+                        "level": "moderate",
+                        "contributing_factors": ["existing:E11", "demographic:male"],
+                    },
+                ],
+                "user_position": {"x": -0.145, "y": 0.398, "z": -0.067},
+                "total_conditions_analyzed": 2,
+                "analysis_metadata": {
+                    "calculation_timestamp": "2026-01-30T12:00:00Z",
+                    "model_version": "1.0.0",
+                },
+            }
+        }
     )

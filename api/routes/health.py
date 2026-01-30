@@ -4,15 +4,20 @@ Health check endpoint for Disease-Relater API.
 Provides API health status and database connectivity checks.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import logging
+import time
 
 from api.config import get_settings
+from api.rate_limit import limiter, get_rate_limit_string
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["health"])
+
+# Get rate limit string for decorators
+_rate_limit = get_rate_limit_string()
 
 
 class HealthResponse(BaseModel):
@@ -33,8 +38,6 @@ class HealthCheckResult(BaseModel):
 
 
 # Track server start time for uptime calculation
-import time
-
 _server_start_time = time.time()
 
 
@@ -48,7 +51,8 @@ _server_start_time = time.time()
         503: {"description": "API is unhealthy or database disconnected"},
     },
 )
-async def health_check() -> HealthResponse:
+@limiter.limit(_rate_limit)
+async def health_check(request: Request) -> HealthResponse:
     """Get API health status.
 
     Returns basic health information including:
@@ -75,7 +79,8 @@ async def health_check() -> HealthResponse:
     settings = get_settings()
     uptime = time.time() - _server_start_time
 
-    # Check database connectivity (placeholder - will be implemented with actual DB checks)
+    # Check database connectivity
+    # (placeholder - will be implemented with actual DB checks)
     db_status = "connected"  # TODO: Add actual DB connectivity check
 
     return HealthResponse(
@@ -94,7 +99,8 @@ async def health_check() -> HealthResponse:
     description="Returns detailed health information including all component checks.",
     include_in_schema=False,  # Hide from public docs (internal use)
 )
-async def health_check_detailed() -> HealthCheckResult:
+@limiter.limit(_rate_limit)
+async def health_check_detailed(request: Request) -> HealthCheckResult:
     """Get detailed health status for monitoring.
 
     Returns comprehensive health information for monitoring systems.
@@ -160,7 +166,8 @@ async def health_check_detailed() -> HealthCheckResult:
         503: {"description": "Service is not ready"},
     },
 )
-async def readiness_check() -> Dict[str, str]:
+@limiter.limit(_rate_limit)
+async def readiness_check(request: Request) -> Dict[str, str]:
     """Readiness probe for container orchestration.
 
     Returns 200 when the service is ready to accept traffic,
@@ -182,7 +189,8 @@ async def readiness_check() -> Dict[str, str]:
         503: {"description": "Service is not alive (should be restarted)"},
     },
 )
-async def liveness_check() -> Dict[str, str]:
+@limiter.limit(_rate_limit)
+async def liveness_check(request: Request) -> Dict[str, str]:
     """Liveness probe for container orchestration.
 
     Returns 200 when the service is alive and should not be restarted,

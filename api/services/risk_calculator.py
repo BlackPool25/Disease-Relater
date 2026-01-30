@@ -2,15 +2,20 @@
 Risk Calculator Service
 
 Business logic for calculating disease risk scores based on:
-- Existing conditions and their comorbidity relationships
-- Demographic factors (age, gender, BMI, smoking, exercise)
-- Prevalence data stratified by sex and age
-- 3D disease coordinates for user positioning
+- Population prevalence as base risk
+- Comorbidity relationships with multiplicative odds ratios
+- Disease-category-specific lifestyle factor adjustments
+- Age-based risk multipliers
+
+Agent 3: Calculation Engine
+- Uses prevalence-based base risk (not odds ratios)
+- Multiplicative comorbidity multipliers
+- Category-specific lifestyle adjustments (metabolic, cardiovascular, respiratory)
+- Age-adjusted risk multipliers
 """
 
 import logging
-from typing import Dict, List, Optional, Any
-from collections import defaultdict
+from typing import Dict, List, Literal, Any
 
 from api.schemas.calculate import (
     RiskCalculationRequest,
@@ -23,10 +28,18 @@ logger = logging.getLogger(__name__)
 
 
 class RiskCalculator:
-    """Calculate disease risk scores using comorbidity data.
+    """Calculate disease risk scores using prevalence and comorbidity data.
 
-    Uses odds ratios from disease relationships, demographic modifiers,
-    and prevalence data to compute risk scores and user position.
+    Implements a four-stage risk calculation:
+    1. Base risk from population prevalence (demographics-specific)
+    2. Comorbidity multipliers (multiplicative odds ratios)
+    3. Lifestyle adjustments (category-specific multipliers)
+    4. Age-based risk adjustments
+
+    Disease categories based on ICD-10 chapters:
+    - E (Endocrine): Metabolic diseases
+    - I (Circulatory): Cardiovascular diseases
+    - J (Respiratory): Respiratory diseases
     """
 
     # Risk level thresholds
@@ -34,11 +47,65 @@ class RiskCalculator:
     RISK_HIGH = 0.50
     RISK_MODERATE = 0.25
 
-    # Demographic modifier weights
-    BMI_OVERWEIGHT = 25.0
-    BMI_OBESE = 30.0
+    # Age thresholds and multipliers
     AGE_ELDERLY = 65
     AGE_MIDDLE = 45
+    AGE_YOUNG = 30
+
+    # Age multipliers by category
+    AGE_MULTIPLIERS = {
+        "metabolic": {
+            "elderly": 1.3,  # 65+
+            "middle": 1.15,  # 45-64
+            "young_adult": 1.0,  # 30-44
+            "young": 0.8,  # <30 (protective)
+        },
+        "cardiovascular": {
+            "elderly": 1.5,  # 65+ (high impact)
+            "middle": 1.25,  # 45-64
+            "young_adult": 1.0,  # 30-44
+            "young": 0.7,  # <30 (protective)
+        },
+        "respiratory": {
+            "elderly": 1.2,  # 65+
+            "middle": 1.1,  # 45-64
+            "young_adult": 1.0,  # 30-44
+            "young": 0.9,  # <30 (slight protection)
+        },
+        "other": {
+            "elderly": 1.15,
+            "middle": 1.05,
+            "young_adult": 1.0,
+            "young": 0.95,
+        },
+    }
+
+    # BMI thresholds
+    BMI_OVERWEIGHT = 25.0
+    BMI_OBESE = 30.0
+
+    # Disease category mappings (ICD-10 chapter -> category)
+    DISEASE_CATEGORIES = {
+        "E": "metabolic",  # Endocrine, nutritional and metabolic diseases
+        "I": "cardiovascular",  # Diseases of the circulatory system
+        "J": "respiratory",  # Diseases of the respiratory system
+    }
+
+    # Lifestyle multipliers by disease category
+    LIFESTYLE_MULTIPLIERS = {
+        "metabolic": {
+            "bmi_obese": 1.5,  # BMI >= 30
+            "bmi_overweight": 1.2,  # BMI 25-30
+        },
+        "cardiovascular": {
+            "smoking": 1.8,
+            "exercise_low": 1.3,  # sedentary or light
+            "exercise_high": 0.7,  # active (protective)
+        },
+        "respiratory": {
+            "smoking": 1.6,
+        },
+    }
 
     def __init__(self, supabase_client):
         """Initialize with Supabase client for database queries.
@@ -48,17 +115,19 @@ class RiskCalculator:
         """
         self.client = supabase_client
         self.logger = logging.getLogger(__name__)
+        # Cache for disease names to avoid repeated queries
+        self._disease_names_cache: Dict[str, str] = {}
 
     async def calculate_risks(
         self, request: RiskCalculationRequest
     ) -> RiskCalculationResponse:
         """Calculate risk scores for a user based on their conditions.
 
-        Algorithm:
-        1. Validate and fetch existing condition data
-        2. Get related diseases with odds ratios from relationships table
-        3. Calculate base risk scores from odds ratios
-        4. Apply demographic modifiers
+        Four-stage calculation pipeline:
+        1. Get base risks from population prevalence for all diseases
+        2. Apply comorbidity multipliers for user's existing conditions
+        3. Apply disease-category-specific lifestyle factor adjustments
+        4. Apply age-based risk multipliers
         5. Calculate user position as weighted average of 3D vectors
 
         Args:
@@ -75,16 +144,26 @@ class RiskCalculator:
         if not conditions:
             raise ValueError("No valid conditions found for provided ICD codes")
 
-        # Step 2: Get related diseases with odds ratios
-        related_diseases = await self._get_related_diseases(request.existing_conditions)
+        # Step 2: Get base risks from prevalence for all diseases
+        # Also populates disease names cache
+        base_risks = await self._calculate_base_risks_for_all(request)
 
-        # Step 3: Calculate base risk scores
-        risk_scores = self._calculate_base_risks(related_diseases, conditions, request)
+        # Step 3: Apply comorbidity multipliers
+        risks_with_comorbidity = await self._apply_comorbidity_multipliers(
+            base_risks, request.existing_conditions
+        )
 
-        # Step 4: Apply demographic modifiers
-        risk_scores = self._apply_modifiers(risk_scores, request)
+        # Step 4: Apply lifestyle factor adjustments (includes age adjustments)
+        final_risks, contributing_factors = await self._apply_lifestyle_factors(
+            risks_with_comorbidity, request
+        )
 
-        # Step 5: Calculate user position
+        # Step 5: Convert to RiskScore objects and get top results
+        risk_scores = await self._convert_to_risk_scores(
+            final_risks, contributing_factors, conditions, request.existing_conditions
+        )
+
+        # Step 6: Calculate user position
         user_position = self._calculate_position(conditions)
 
         return RiskCalculationResponse(
@@ -93,7 +172,7 @@ class RiskCalculator:
             total_conditions_analyzed=len(conditions),
             analysis_metadata={
                 "conditions_processed": [c.get("icd_code") for c in conditions],
-                "related_diseases_found": len(related_diseases),
+                "related_diseases_analyzed": len(final_risks),
                 "gender": request.gender,
                 "age": request.age,
             },
@@ -101,6 +180,8 @@ class RiskCalculator:
 
     async def _get_conditions(self, icd_codes: List[str]) -> List[Dict[str, Any]]:
         """Fetch disease data for given ICD codes.
+
+        Optimized to use a single batch query instead of per-code queries.
 
         Args:
             icd_codes: List of ICD-10 codes
@@ -110,241 +191,420 @@ class RiskCalculator:
         """
         conditions = []
 
-        for code in icd_codes:
-            try:
-                # Query diseases table for condition data
-                response = (
-                    await self.client.table("diseases")
-                    .select(
-                        "id, icd_code, name_english, name_german, "
-                        "chapter_code, prevalence_male, prevalence_female, prevalence_total, "
-                        "vector_x, vector_y, vector_z"
-                    )
-                    .eq("icd_code", code)
-                    .execute()
+        try:
+            # Batch fetch all conditions in one query
+            response = (
+                await self.client.table("diseases")
+                .select(
+                    "id, icd_code, name_english, name_german, "
+                    "chapter_code, prevalence_male, prevalence_female, "
+                    "prevalence_total, vector_x, vector_y, vector_z"
                 )
+                .in_("icd_code", icd_codes)
+                .execute()
+            )
 
-                if response.data and len(response.data) > 0:
-                    conditions.append(response.data[0])
-                else:
-                    self.logger.warning(f"Disease not found: {code}")
-            except Exception as e:
-                self.logger.error(f"Error fetching condition {code}: {e}")
+            if response.data:
+                for disease in response.data:
+                    conditions.append(disease)
+                    # Cache the disease name
+                    self._disease_names_cache[disease["icd_code"]] = disease.get(
+                        "name_english", disease["icd_code"]
+                    )
+
+            # Log any codes that weren't found
+            found_codes = {c["icd_code"] for c in conditions}
+            missing_codes = set(icd_codes) - found_codes
+            for code in missing_codes:
+                self.logger.warning(f"Disease not found: {code}")
+
+        except Exception as e:
+            self.logger.error(f"Error fetching conditions: {e}")
 
         return conditions
 
-    async def _get_related_diseases(self, icd_codes: List[str]) -> List[Dict[str, Any]]:
-        """Get diseases related to existing conditions via comorbidity relationships.
+    async def _get_disease_names(self, icd_codes: List[str]) -> Dict[str, str]:
+        """Fetch disease names for a list of ICD codes.
 
-        Uses bidirectional search on disease_relationships table to find
-        all diseases connected to user's conditions, ordered by odds ratio.
+        Uses cached values when available, queries database for missing ones.
 
         Args:
-            icd_codes: List of user's existing condition ICD codes
+            icd_codes: List of ICD-10 codes
 
         Returns:
-            List of related diseases with odds ratios and relationship data
+            Dictionary mapping icd_code -> name_english
         """
-        related = []
-        seen_diseases = set(icd_codes)  # Track to avoid duplicates
+        result: Dict[str, str] = {}
+        codes_to_fetch: List[str] = []
 
+        # Check cache first
         for code in icd_codes:
+            if code in self._disease_names_cache:
+                result[code] = self._disease_names_cache[code]
+            else:
+                codes_to_fetch.append(code)
+
+        # Batch fetch missing codes
+        if codes_to_fetch:
             try:
-                # Get disease ID first
-                disease_response = (
-                    await self.client.table("diseases")
-                    .select("id")
-                    .eq("icd_code", code)
-                    .execute()
-                )
-
-                if not disease_response.data:
-                    continue
-
-                disease_id = disease_response.data[0]["id"]
-
-                # Query relationships where this disease is either source or target
-                # Using or filter for bidirectional search
-                response = (
-                    await self.client.table("disease_relationships")
-                    .select(
-                        "disease_1_id, disease_2_id, odds_ratio, p_value, "
-                        "patient_count_total, relationship_strength, "
-                        "disease_1: diseases!disease_1_id(icd_code, name_english), "
-                        "disease_2: diseases!disease_2_id(icd_code, name_english)"
+                # Fetch in batches to avoid query limits
+                batch_size = 100
+                for i in range(0, len(codes_to_fetch), batch_size):
+                    batch = codes_to_fetch[i : i + batch_size]
+                    response = (
+                        await self.client.table("diseases")
+                        .select("icd_code, name_english")
+                        .in_("icd_code", batch)
+                        .execute()
                     )
-                    .or_(f"disease_1_id.eq.{disease_id},disease_2_id.eq.{disease_id}")
-                    .execute()
-                )
 
-                if response.data:
-                    for rel in response.data:
-                        # Determine which disease is the "other" one
-                        if rel["disease_1_id"] == disease_id:
-                            other_disease = rel.get("disease_2", {})
-                            other_id = rel["disease_2_id"]
-                        else:
-                            other_disease = rel.get("disease_1", {})
-                            other_id = rel["disease_1_id"]
-
-                        other_code = other_disease.get("icd_code", "")
-
-                        # Skip if already in user's conditions or seen
-                        if other_code in seen_diseases:
-                            continue
-
-                        seen_diseases.add(other_code)
-
-                        related.append(
-                            {
-                                "icd_code": other_code,
-                                "disease_name": other_disease.get(
-                                    "name_english", "Unknown"
-                                ),
-                                "odds_ratio": rel.get("odds_ratio", 1.0),
-                                "p_value": rel.get("p_value"),
-                                "patient_count": rel.get("patient_count_total", 0),
-                                "relationship_strength": rel.get(
-                                    "relationship_strength", "weak"
-                                ),
-                                "source_condition": code,
-                            }
-                        )
+                    if response.data:
+                        for disease in response.data:
+                            code = disease["icd_code"]
+                            name = disease.get("name_english") or code
+                            result[code] = name
+                            self._disease_names_cache[code] = name
 
             except Exception as e:
-                self.logger.error(f"Error fetching related diseases for {code}: {e}")
+                self.logger.error(f"Error fetching disease names: {e}")
 
-        # Sort by odds ratio descending
-        related.sort(key=lambda x: x["odds_ratio"], reverse=True)
-        return related
+        # Fill in any missing codes with the code itself
+        for code in icd_codes:
+            if code not in result:
+                result[code] = code
 
-    def _calculate_base_risks(
-        self,
-        related_diseases: List[Dict],
-        conditions: List[Dict],
-        request: RiskCalculationRequest,
-    ) -> List[RiskScore]:
-        """Calculate base risk scores from odds ratios.
+        return result
 
-        Converts odds ratios to probability-like risk scores (0-1 range).
-        Higher odds ratios = higher risk. Also considers prevalence data
-        when available.
+    def _get_disease_category(self, icd_code: str) -> str:
+        """Get disease category from ICD code chapter.
+
+        Maps ICD-10 chapter codes to disease categories:
+        - E -> metabolic (Endocrine/nutritional)
+        - I -> cardiovascular (Circulatory)
+        - J -> respiratory (Respiratory)
+        - Others -> other
 
         Args:
-            related_diseases: List of related diseases with odds ratios
-            conditions: User's existing conditions
-            request: Original request for demographic context
+            icd_code: ICD-10 code (e.g., "E11", "I10")
 
         Returns:
-            List of RiskScore objects with base risk calculations
+            Disease category string
         """
-        risk_scores = []
+        if not icd_code or len(icd_code) < 1:
+            return "other"
 
-        # Get prevalence field based on gender
-        prev_field = (
+        chapter = icd_code[0].upper()
+        return self.DISEASE_CATEGORIES.get(chapter, "other")
+
+    def _get_age_group(self, age: int) -> str:
+        """Classify age into group for risk adjustment.
+
+        Args:
+            age: User's age in years
+
+        Returns:
+            Age group string: elderly, middle, young_adult, or young
+        """
+        if age >= self.AGE_ELDERLY:
+            return "elderly"
+        elif age >= self.AGE_MIDDLE:
+            return "middle"
+        elif age >= self.AGE_YOUNG:
+            return "young_adult"
+        return "young"
+
+    async def _calculate_base_risks_for_all(
+        self, request: RiskCalculationRequest
+    ) -> Dict[str, float]:
+        """Calculate base risk scores from population prevalence for all diseases.
+
+        Algorithm:
+        base_risk[disease] = prevalence[disease][sex]
+
+        Uses the diseases table which has aggregated prevalence data.
+        Also populates the disease names cache.
+
+        Args:
+            request: User request with demographics
+
+        Returns:
+            Dictionary mapping disease_id -> base_risk (0.0 to 1.0)
+        """
+        base_risks: Dict[str, float] = {}
+
+        # Determine prevalence field based on gender
+        prevalence_field = (
             "prevalence_male" if request.gender == "male" else "prevalence_female"
         )
 
-        for disease in related_diseases:
-            odds_ratio = disease.get("odds_ratio", 1.0)
+        try:
+            # Fetch all diseases with their prevalence and names
+            response = (
+                await self.client.table("diseases")
+                .select(f"icd_code, name_english, {prevalence_field}, prevalence_total")
+                .execute()
+            )
 
-            # Convert odds ratio to base risk using logistic-like function
-            # This maps odds ratios to 0-1 range, with diminishing returns
-            # OR=1 -> 0.0, OR=2 -> ~0.24, OR=5 -> ~0.44, OR=10 -> ~0.60, OR=50 -> ~0.90
-            base_risk = odds_ratio / (odds_ratio + 3.0)
+            if response.data:
+                for disease in response.data:
+                    disease_id = disease["icd_code"]
+                    # Use gender-specific prevalence if available, otherwise total
+                    prevalence = disease.get(prevalence_field) or disease.get(
+                        "prevalence_total", 0.0
+                    )
+                    base_risks[disease_id] = float(prevalence) if prevalence else 0.0
 
-            contributing_factors = [
-                f"Odds ratio: {odds_ratio:.2f} from {disease['source_condition']}",
-            ]
+                    # Cache disease name
+                    name = disease.get("name_english") or disease_id
+                    self._disease_names_cache[disease_id] = name
 
-            # Add relationship strength if significant
-            strength = disease.get("relationship_strength", "weak")
-            if strength in ["extreme", "very_strong", "strong"]:
-                contributing_factors.append(
-                    f"{strength.replace('_', ' ').title()} relationship"
+        except Exception as e:
+            self.logger.error(f"Error fetching base risks: {e}")
+
+        return base_risks
+
+    async def _apply_comorbidity_multipliers(
+        self, base_risks: Dict[str, float], existing_conditions: List[str]
+    ) -> Dict[str, float]:
+        """Apply comorbidity multipliers to base risks.
+
+        Algorithm:
+        For each condition in user's existing conditions:
+            Get related diseases from disease_relationships table
+            For each related disease:
+                risk[disease] *= odds_ratio[condition, disease]
+
+        This implements multiplicative comorbidity effects where having
+        one disease increases the risk of related diseases proportionally
+        to their odds ratio.
+
+        Optimized to use batch queries instead of per-condition queries.
+
+        Args:
+            base_risks: Dictionary of base risks by disease_id
+            existing_conditions: List of user's condition ICD codes
+
+        Returns:
+            Modified risks with comorbidity multipliers applied
+        """
+        modified_risks = base_risks.copy()
+
+        try:
+            # Batch fetch all disease IDs for existing conditions
+            disease_response = (
+                await self.client.table("diseases")
+                .select("id, icd_code")
+                .in_("icd_code", existing_conditions)
+                .execute()
+            )
+
+            if not disease_response.data:
+                return modified_risks
+
+            # Create mapping of disease_id -> icd_code and collect IDs
+            disease_ids = []
+            id_to_code = {}
+            for disease in disease_response.data:
+                disease_id = disease["id"]
+                disease_ids.append(disease_id)
+                id_to_code[disease_id] = disease["icd_code"]
+
+            if not disease_ids:
+                return modified_risks
+
+            # Build OR filter for all disease IDs
+            # Supabase requires the IDs to be formatted in specific way
+            or_filters = ",".join(
+                [f"disease_1_id.eq.{did},disease_2_id.eq.{did}" for did in disease_ids]
+            )
+
+            # Batch fetch all relationships for all conditions
+            response = (
+                await self.client.table("disease_relationships")
+                .select(
+                    "disease_1_id, disease_2_id, odds_ratio, "
+                    "disease_1: diseases!disease_1_id(icd_code), "
+                    "disease_2: diseases!disease_2_id(icd_code)"
                 )
+                .or_(or_filters)
+                .execute()
+            )
+
+            if response.data:
+                disease_id_set = set(disease_ids)
+                for rel in response.data:
+                    d1_id = rel["disease_1_id"]
+                    d2_id = rel["disease_2_id"]
+
+                    # Determine which disease is the user's condition
+                    # and which is the "other" related disease
+                    if d1_id in disease_id_set:
+                        other_disease = rel.get("disease_2", {})
+                        other_code = other_disease.get("icd_code", "")
+                    elif d2_id in disease_id_set:
+                        other_disease = rel.get("disease_1", {})
+                        other_code = other_disease.get("icd_code", "")
+                    else:
+                        continue
+
+                    if other_code and other_code in modified_risks:
+                        odds_ratio = rel.get("odds_ratio", 1.0)
+                        if odds_ratio and odds_ratio > 0:
+                            # Multiplicative application
+                            modified_risks[other_code] *= odds_ratio
+
+        except Exception as e:
+            self.logger.error(f"Error applying comorbidity multipliers: {e}")
+
+        return modified_risks
+
+    async def _apply_lifestyle_factors(
+        self, risks: Dict[str, float], request: RiskCalculationRequest
+    ) -> tuple[Dict[str, float], Dict[str, List[str]]]:
+        """Apply disease-category-specific lifestyle and age factor adjustments.
+
+        Applies multiplicative adjustments for:
+        - BMI (metabolic diseases)
+        - Smoking (cardiovascular and respiratory)
+        - Exercise level (cardiovascular)
+        - Age (all categories, with category-specific multipliers)
+
+        Args:
+            risks: Dictionary of risk scores by disease_id
+            request: User request with BMI, smoking status, exercise level, age
+
+        Returns:
+            Tuple of (adjusted_risks, contributing_factors)
+        """
+        adjusted_risks: Dict[str, float] = {}
+        contributing_factors: Dict[str, List[str]] = {}
+
+        # Get age group once
+        age_group = self._get_age_group(request.age)
+
+        for disease_id, base_risk in risks.items():
+            category = self._get_disease_category(disease_id)
+            multiplier = 1.0
+            factors: List[str] = []
+
+            # BMI adjustments for metabolic diseases
+            if category == "metabolic":
+                if request.bmi >= self.BMI_OBESE:
+                    multiplier *= self.LIFESTYLE_MULTIPLIERS["metabolic"]["bmi_obese"]
+                    factors.append("High BMI (obese) - metabolic impact")
+                elif request.bmi >= self.BMI_OVERWEIGHT:
+                    multiplier *= self.LIFESTYLE_MULTIPLIERS["metabolic"][
+                        "bmi_overweight"
+                    ]
+                    factors.append("Elevated BMI (overweight) - metabolic impact")
+
+            # Smoking adjustments
+            if request.smoking:
+                if category == "cardiovascular":
+                    multiplier *= self.LIFESTYLE_MULTIPLIERS["cardiovascular"][
+                        "smoking"
+                    ]
+                    factors.append("Smoking - cardiovascular impact")
+                elif category == "respiratory":
+                    multiplier *= self.LIFESTYLE_MULTIPLIERS["respiratory"]["smoking"]
+                    factors.append("Smoking - respiratory impact")
+
+            # Exercise adjustments for cardiovascular
+            if category == "cardiovascular":
+                if request.exercise_level in ["sedentary", "light"]:
+                    multiplier *= self.LIFESTYLE_MULTIPLIERS["cardiovascular"][
+                        "exercise_low"
+                    ]
+                    factors.append("Low exercise level - cardiovascular impact")
+                elif request.exercise_level == "active":
+                    multiplier *= self.LIFESTYLE_MULTIPLIERS["cardiovascular"][
+                        "exercise_high"
+                    ]
+                    factors.append("Active lifestyle - cardiovascular protective")
+
+            # Age-based adjustments (category-specific)
+            age_multipliers = self.AGE_MULTIPLIERS.get(
+                category, self.AGE_MULTIPLIERS["other"]
+            )
+            age_mult = age_multipliers.get(age_group, 1.0)
+            if age_mult != 1.0:
+                multiplier *= age_mult
+                if age_mult > 1.0:
+                    factors.append(f"Age ({request.age}) - increased {category} risk")
+                else:
+                    factors.append(f"Age ({request.age}) - lower {category} risk")
+
+            # Apply multiplier and cap at 1.0
+            adjusted_risk = min(1.0, base_risk * multiplier)
+            adjusted_risks[disease_id] = adjusted_risk
+
+            # Store contributing factors for this disease
+            contributing_factors[disease_id] = factors
+
+        return adjusted_risks, contributing_factors
+
+    async def _convert_to_risk_scores(
+        self,
+        risks: Dict[str, float],
+        contributing_factors: Dict[str, List[str]],
+        conditions: List[Dict],
+        existing_conditions: List[str],
+    ) -> List[RiskScore]:
+        """Convert risk dictionary to list of RiskScore objects.
+
+        Fetches disease names from database, filters out user's existing
+        conditions and sorts by risk score.
+
+        Args:
+            risks: Dictionary of disease_id -> risk
+            contributing_factors: Dictionary of disease_id -> list of factor strings
+            conditions: User's existing conditions (for relationship tracking)
+            existing_conditions: List of user's ICD codes (to exclude from results)
+
+        Returns:
+            List of RiskScore objects, sorted by risk descending
+        """
+        risk_scores: List[RiskScore] = []
+        existing_set = set(existing_conditions)
+
+        # Filter to diseases we want to include (non-zero risk, not existing)
+        filtered_codes = [
+            code
+            for code, risk in risks.items()
+            if risk > 0 and code not in existing_set
+        ]
+
+        # Batch fetch disease names
+        disease_names = await self._get_disease_names(filtered_codes)
+
+        for disease_id in filtered_codes:
+            risk = risks[disease_id]
+
+            # Get contributing factors for this disease
+            factors = contributing_factors.get(disease_id, [])
+            factors_list: List[str] = (
+                factors if factors else ["Population prevalence baseline"]
+            )
+
+            # Get actual disease name
+            disease_name = disease_names.get(disease_id, disease_id)
+
+            # Classify risk level
+            level = self._classify_risk_level(risk)
 
             risk_scores.append(
                 RiskScore(
-                    disease_id=disease["icd_code"],
-                    disease_name=disease["disease_name"],
-                    risk=round(base_risk, 4),
-                    level=self._classify_risk_level(base_risk),
-                    contributing_factors=contributing_factors,
+                    disease_id=disease_id,
+                    disease_name=disease_name,
+                    risk=round(risk, 4),
+                    level=level,
+                    contributing_factors=factors_list,
                 )
             )
 
-        return risk_scores
-
-    def _apply_modifiers(
-        self,
-        risk_scores: List[RiskScore],
-        request: RiskCalculationRequest,
-    ) -> List[RiskScore]:
-        """Apply demographic modifiers to risk scores.
-
-        Modifiers:
-        - BMI: Overweight (+0.05), Obese (+0.10)
-        - Smoking: +0.15 to all risks
-        - Exercise: Sedentary (+0.05), Active (-0.05)
-        - Age: Elderly (+0.10), Middle-aged (+0.05)
-
-        Args:
-            risk_scores: Current risk scores to modify
-            request: User demographic data
-
-        Returns:
-            Modified risk scores with adjustments applied
-        """
-        modified_scores = []
-
-        for score in risk_scores:
-            modified_risk = score.risk
-            new_factors = score.contributing_factors.copy()
-
-            # BMI modifier
-            if request.bmi >= self.BMI_OBESE:
-                modified_risk += 0.10
-                new_factors.append("High BMI (obese)")
-            elif request.bmi >= self.BMI_OVERWEIGHT:
-                modified_risk += 0.05
-                new_factors.append("Elevated BMI (overweight)")
-
-            # Smoking modifier
-            if request.smoking:
-                modified_risk += 0.15
-                new_factors.append("Smoking status")
-
-            # Exercise modifier
-            if request.exercise_level == "sedentary":
-                modified_risk += 0.05
-                new_factors.append("Sedentary lifestyle")
-            elif request.exercise_level == "active":
-                modified_risk = max(0.0, modified_risk - 0.05)
-                new_factors.append("Active lifestyle (protective)")
-
-            # Age modifier
-            if request.age >= self.AGE_ELDERLY:
-                modified_risk += 0.10
-                new_factors.append("Advanced age")
-            elif request.age >= self.AGE_MIDDLE:
-                modified_risk += 0.05
-                new_factors.append("Middle age")
-
-            # Cap at 1.0
-            modified_risk = min(1.0, modified_risk)
-
-            modified_scores.append(
-                RiskScore(
-                    disease_id=score.disease_id,
-                    disease_name=score.disease_name,
-                    risk=round(modified_risk, 4),
-                    level=self._classify_risk_level(modified_risk),
-                    contributing_factors=new_factors,
-                )
-            )
-
-        return modified_scores
+        # Sort by risk descending and return top results
+        risk_scores.sort(key=lambda x: x.risk, reverse=True)
+        return risk_scores[:50]  # Return top 50 to avoid overwhelming response
 
     def _calculate_position(self, conditions: List[Dict]) -> UserPosition:
         """Calculate user's position in 3D disease space.
@@ -390,7 +650,9 @@ class RiskCalculator:
             z=round(weighted_z / total_weight, 4),
         )
 
-    def _classify_risk_level(self, risk_score: float) -> str:
+    def _classify_risk_level(
+        self, risk_score: float
+    ) -> Literal["low", "moderate", "high", "very_high"]:
         """Classify risk score into level category.
 
         Args:

@@ -2,6 +2,12 @@
 Unit Tests for Risk Calculator
 
 Tests the risk calculation algorithm and API endpoint.
+
+Updated for refactored calculation engine:
+- Prevalence-based base risk
+- Multiplicative comorbidity multipliers
+- Category-specific lifestyle adjustments
+- Age-based risk adjustments
 """
 
 import pytest
@@ -133,30 +139,6 @@ class TestRiskCalculator:
             },
         ]
 
-    @pytest.fixture
-    def sample_related(self) -> List[Dict]:
-        """Sample related diseases data."""
-        return [
-            {
-                "icd_code": "E13",
-                "disease_name": "Other specified diabetes",
-                "odds_ratio": 15.5,
-                "p_value": 0.001,
-                "patient_count": 5000,
-                "relationship_strength": "very_strong",
-                "source_condition": "E11",
-            },
-            {
-                "icd_code": "N18",
-                "disease_name": "Chronic kidney disease",
-                "odds_ratio": 8.2,
-                "p_value": 0.001,
-                "patient_count": 3200,
-                "relationship_strength": "strong",
-                "source_condition": "E11",
-            },
-        ]
-
     def test_classify_risk_level(self, calculator):
         """Test risk level classification."""
         assert calculator._classify_risk_level(0.85) == "very_high"
@@ -164,6 +146,46 @@ class TestRiskCalculator:
         assert calculator._classify_risk_level(0.35) == "moderate"
         assert calculator._classify_risk_level(0.15) == "low"
         assert calculator._classify_risk_level(0.0) == "low"
+
+    def test_get_disease_category(self, calculator):
+        """Test disease category classification from ICD codes."""
+        # Metabolic diseases (E chapter)
+        assert calculator._get_disease_category("E11") == "metabolic"
+        assert calculator._get_disease_category("E10") == "metabolic"
+
+        # Cardiovascular diseases (I chapter)
+        assert calculator._get_disease_category("I10") == "cardiovascular"
+        assert calculator._get_disease_category("I25") == "cardiovascular"
+
+        # Respiratory diseases (J chapter)
+        assert calculator._get_disease_category("J45") == "respiratory"
+        assert calculator._get_disease_category("J44") == "respiratory"
+
+        # Other diseases
+        assert calculator._get_disease_category("N18") == "other"
+        assert calculator._get_disease_category("K50") == "other"
+
+        # Edge cases
+        assert calculator._get_disease_category("") == "other"
+        assert calculator._get_disease_category("X") == "other"
+
+    def test_get_age_group(self, calculator):
+        """Test age group classification."""
+        # Elderly (65+)
+        assert calculator._get_age_group(65) == "elderly"
+        assert calculator._get_age_group(80) == "elderly"
+
+        # Middle (45-64)
+        assert calculator._get_age_group(45) == "middle"
+        assert calculator._get_age_group(64) == "middle"
+
+        # Young adult (30-44)
+        assert calculator._get_age_group(30) == "young_adult"
+        assert calculator._get_age_group(44) == "young_adult"
+
+        # Young (<30)
+        assert calculator._get_age_group(25) == "young"
+        assert calculator._get_age_group(18) == "young"
 
     def test_calculate_position(self, calculator, sample_conditions):
         """Test 3D position calculation."""
@@ -186,118 +208,119 @@ class TestRiskCalculator:
         assert position.y == 0.0
         assert position.z == 0.0
 
-    def test_calculate_base_risks(self, calculator, sample_related):
-        """Test base risk calculation from odds ratios."""
-        request = RiskCalculationRequest(
-            age=45,
+    @pytest.mark.asyncio
+    async def test_apply_lifestyle_factors_metabolic_bmi(self, calculator):
+        """Test BMI adjustments for metabolic diseases."""
+        risks = {"E11": 0.5, "I10": 0.5}  # E=metabolic, I=cardiovascular
+
+        # Test obese BMI
+        request_obese = RiskCalculationRequest(
+            age=35,  # young_adult - no age adjustment for metabolic
             gender="male",
-            bmi=25.0,
+            bmi=32.0,  # Obese
             existing_conditions=["E11"],
             exercise_level="moderate",
             smoking=False,
         )
 
-        scores = calculator._calculate_base_risks(
-            sample_related,
-            [],  # Empty conditions - just testing odds ratio conversion
-            request,
+        adjusted, factors = await calculator._apply_lifestyle_factors(
+            risks, request_obese
         )
 
-        assert len(scores) == 2
+        # E11 (metabolic) should have 1.5x multiplier for obese BMI
+        assert adjusted["E11"] == pytest.approx(0.5 * 1.5, rel=0.01)
+        # I10 (cardiovascular) should not be affected by BMI
+        assert adjusted["I10"] == pytest.approx(0.5, rel=0.01)
+        assert any("obese" in f.lower() for f in factors["E11"])
 
-        # Check OR=15.5 -> risk should be around 15.5/(15.5+3) = 0.838
-        high_score = scores[0]  # Sorted by odds ratio
-        assert high_score.disease_id == "E13"
-        assert high_score.risk > 0.8
-        assert high_score.level in ["high", "very_high"]
-        assert "Odds ratio" in high_score.contributing_factors[0]
-
-    def test_apply_modifiers(self, calculator):
-        """Test demographic modifiers."""
-        # Test smoking modifier (with normal BMI)
-        base_scores = [
-            RiskScore(
-                disease_id="E13",
-                disease_name="Test",
-                risk=0.5,
-                level="moderate",
-                contributing_factors=["Base factor"],
-            ),
-        ]
+    @pytest.mark.asyncio
+    async def test_apply_lifestyle_factors_cardiovascular_smoking(self, calculator):
+        """Test smoking adjustments for cardiovascular diseases."""
+        risks = {"E11": 0.5, "I10": 0.5}
 
         request_smoker = RiskCalculationRequest(
-            age=45,
+            age=35,
             gender="male",
-            bmi=22.0,  # Normal BMI (no modifier)
+            bmi=22.0,  # Normal BMI
             existing_conditions=["E11"],
             exercise_level="moderate",
             smoking=True,
         )
 
-        modified = calculator._apply_modifiers(base_scores, request_smoker)
-        # 0.5 + 0.15 (smoking) + 0.05 (middle age) = 0.70
-        assert modified[0].risk == 0.70
-        assert "Smoking status" in modified[0].contributing_factors
+        adjusted, factors = await calculator._apply_lifestyle_factors(
+            risks, request_smoker
+        )
 
-        # Test obese BMI modifier (with normal age and no smoking)
-        base_scores = [
-            RiskScore(
-                disease_id="E13",
-                disease_name="Test",
-                risk=0.5,
-                level="moderate",
-                contributing_factors=["Base factor"],
-            ),
-        ]
+        # I10 (cardiovascular) should have 1.8x multiplier for smoking
+        assert adjusted["I10"] == pytest.approx(0.5 * 1.8, rel=0.01)
+        # E11 (metabolic) should not be affected by smoking
+        assert adjusted["E11"] == pytest.approx(0.5, rel=0.01)
+        assert any("smoking" in f.lower() for f in factors["I10"])
 
-        request_obese = RiskCalculationRequest(
-            age=30,  # Young (no age modifier)
+    @pytest.mark.asyncio
+    async def test_apply_lifestyle_factors_respiratory_smoking(self, calculator):
+        """Test smoking adjustments for respiratory diseases."""
+        risks = {"J45": 0.5}  # J=respiratory
+
+        request_smoker = RiskCalculationRequest(
+            age=35,
             gender="male",
-            bmi=32.0,
+            bmi=22.0,
             existing_conditions=["E11"],
             exercise_level="moderate",
+            smoking=True,
+        )
+
+        adjusted, factors = await calculator._apply_lifestyle_factors(
+            risks, request_smoker
+        )
+
+        # J45 (respiratory) should have 1.6x multiplier for smoking
+        assert adjusted["J45"] == pytest.approx(0.5 * 1.6, rel=0.01)
+        assert any("smoking" in f.lower() for f in factors["J45"])
+
+    @pytest.mark.asyncio
+    async def test_apply_lifestyle_factors_cardiovascular_exercise(self, calculator):
+        """Test exercise adjustments for cardiovascular diseases."""
+        risks = {"I10": 0.5}
+
+        # Test low exercise (sedentary)
+        request_sedentary = RiskCalculationRequest(
+            age=35,
+            gender="male",
+            bmi=22.0,
+            existing_conditions=["E11"],
+            exercise_level="sedentary",
             smoking=False,
         )
 
-        modified = calculator._apply_modifiers(base_scores, request_obese)
-        assert modified[0].risk == 0.6  # 0.5 + 0.10 for obese
-        assert "High BMI (obese)" in modified[0].contributing_factors
+        adjusted, factors = await calculator._apply_lifestyle_factors(
+            risks, request_sedentary
+        )
+        assert adjusted["I10"] == pytest.approx(0.5 * 1.3, rel=0.01)
 
-        # Test active lifestyle (protective)
-        base_scores = [
-            RiskScore(
-                disease_id="E13",
-                disease_name="Test",
-                risk=0.5,
-                level="moderate",
-                contributing_factors=["Base factor"],
-            ),
-        ]
-
+        # Test high exercise (active - protective)
         request_active = RiskCalculationRequest(
-            age=30,  # Young (no age modifier)
+            age=35,
             gender="male",
-            bmi=22.0,  # Normal BMI
+            bmi=22.0,
             existing_conditions=["E11"],
             exercise_level="active",
             smoking=False,
         )
 
-        modified = calculator._apply_modifiers(base_scores, request_active)
-        assert modified[0].risk == 0.45  # 0.5 - 0.05 for active
-        assert "Active lifestyle (protective)" in modified[0].contributing_factors
+        adjusted, factors = await calculator._apply_lifestyle_factors(
+            risks, request_active
+        )
+        assert adjusted["I10"] == pytest.approx(0.5 * 0.7, rel=0.01)
+        assert any("active" in f.lower() for f in factors["I10"])
 
-        # Test elderly age modifier
-        base_scores = [
-            RiskScore(
-                disease_id="E13",
-                disease_name="Test",
-                risk=0.5,
-                level="moderate",
-                contributing_factors=["Base factor"],
-            ),
-        ]
+    @pytest.mark.asyncio
+    async def test_apply_lifestyle_factors_age_adjustments(self, calculator):
+        """Test age-based adjustments for different categories."""
+        risks = {"E11": 0.5, "I10": 0.5, "J45": 0.5}
 
+        # Test elderly age (65+)
         request_elderly = RiskCalculationRequest(
             age=70,
             gender="male",
@@ -307,64 +330,56 @@ class TestRiskCalculator:
             smoking=False,
         )
 
-        modified = calculator._apply_modifiers(base_scores, request_elderly)
-        assert modified[0].risk == 0.6  # 0.5 + 0.10 for elderly
-        assert "Advanced age" in modified[0].contributing_factors
-
-    def test_risk_cap_at_1(self, calculator):
-        """Test that risk scores are capped at 1.0."""
-        base_scores = [
-            RiskScore(
-                disease_id="E13",
-                disease_name="Test",
-                risk=0.9,
-                level="very_high",
-                contributing_factors=["Base factor"],
-            ),
-        ]
-
-        request = RiskCalculationRequest(
-            age=70,
-            gender="male",
-            bmi=35.0,  # Obese
-            existing_conditions=["E11"],
-            exercise_level="sedentary",
-            smoking=True,
+        adjusted, factors = await calculator._apply_lifestyle_factors(
+            risks, request_elderly
         )
 
-        # Total modifiers: 0.10 (obese) + 0.15 (smoking) + 0.05 (sedentary) + 0.10 (elderly) = 0.40
-        # Risk would be 0.9 + 0.4 = 1.3, but should cap at 1.0
-        modified = calculator._apply_modifiers(base_scores, request)
-        assert modified[0].risk == 1.0
+        # Elderly multipliers: metabolic=1.3, cardiovascular=1.5, respiratory=1.2
+        assert adjusted["E11"] == pytest.approx(0.5 * 1.3, rel=0.01)
+        assert adjusted["I10"] == pytest.approx(0.5 * 1.5, rel=0.01)
+        assert adjusted["J45"] == pytest.approx(0.5 * 1.2, rel=0.01)
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Async mocking complexity - core logic tested elsewhere")
-    async def test_get_conditions(self, calculator, mock_client):
-        """Test fetching conditions from database.
+    async def test_apply_lifestyle_factors_young_protective(self, calculator):
+        """Test that young age provides protective effect."""
+        risks = {"I10": 0.5}  # Cardiovascular
 
-        NOTE: This test is skipped due to complex async mocking requirements.
-        The actual database query logic is tested via integration tests.
-        """
-        # Mock the response
-        mock_response = MagicMock()
-        mock_response.data = [
-            {
-                "id": 1,
-                "icd_code": "E11",
-                "name_english": "Type 2 diabetes mellitus",
-                "vector_x": 0.5,
-                "vector_y": -0.3,
-                "vector_z": 0.8,
-            }
-        ]
-        mock_client.table.return_value.select.return_value.eq.return_value.execute = (
-            AsyncMock(return_value=mock_response)
+        request_young = RiskCalculationRequest(
+            age=25,  # Young
+            gender="male",
+            bmi=22.0,
+            existing_conditions=["E11"],
+            exercise_level="moderate",
+            smoking=False,
         )
 
-        conditions = await calculator._get_conditions(["E11"])
+        adjusted, factors = await calculator._apply_lifestyle_factors(
+            risks, request_young
+        )
 
-        assert len(conditions) == 1
-        assert conditions[0]["icd_code"] == "E11"
+        # Young has 0.7 multiplier for cardiovascular (protective)
+        assert adjusted["I10"] == pytest.approx(0.5 * 0.7, rel=0.01)
+        assert any("lower" in f.lower() for f in factors["I10"])
+
+    @pytest.mark.asyncio
+    async def test_risk_cap_at_1(self, calculator):
+        """Test that risk scores are capped at 1.0."""
+        # Start with high base risk
+        risks = {"I10": 0.8}
+
+        # Apply multiple risk-increasing factors
+        request = RiskCalculationRequest(
+            age=70,  # Elderly: 1.5x for cardiovascular
+            gender="male",
+            bmi=22.0,
+            existing_conditions=["E11"],
+            exercise_level="sedentary",  # 1.3x for cardiovascular
+            smoking=True,  # 1.8x for cardiovascular
+        )
+
+        # Combined: 0.8 * 1.5 * 1.3 * 1.8 = 2.808, should cap at 1.0
+        adjusted, factors = await calculator._apply_lifestyle_factors(risks, request)
+        assert adjusted["I10"] == 1.0
 
     @pytest.mark.asyncio
     async def test_calculate_risks_empty_conditions(self, calculator):
@@ -412,60 +427,48 @@ class TestRiskCalculationResponse:
         assert response.user_position.x == 0.5
 
 
-class TestIntegration:
-    """Integration-style tests with mocked database."""
+class TestDiseaseNameResolution:
+    """Test disease name resolution from database."""
+
+    @pytest.fixture
+    def mock_client(self):
+        """Create mock Supabase client."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def calculator(self, mock_client):
+        """Create RiskCalculator instance with mock client."""
+        return RiskCalculator(mock_client)
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Requires full database setup - test core logic instead")
-    async def test_full_calculation_flow(self):
-        """Test the complete calculation flow."""
-        # Create mock client
-        mock_client = AsyncMock()
+    async def test_get_disease_names_caching(self, calculator, mock_client):
+        """Test that disease names are cached properly."""
+        # Pre-populate cache
+        calculator._disease_names_cache["E11"] = "Type 2 diabetes mellitus"
+        calculator._disease_names_cache["I10"] = "Essential hypertension"
 
-        # Mock disease query response
-        disease_response = MagicMock()
-        disease_response.data = [{"id": 1, "icd_code": "E11"}]
-        mock_client.table.return_value.select.return_value.eq.return_value.execute = (
-            AsyncMock(return_value=disease_response)
+        # Should not make any database calls for cached codes
+        names = await calculator._get_disease_names(["E11", "I10"])
+
+        assert names["E11"] == "Type 2 diabetes mellitus"
+        assert names["I10"] == "Essential hypertension"
+        # No database calls should have been made
+        mock_client.table.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_disease_names_fallback(self, calculator, mock_client):
+        """Test fallback to ICD code when name not found."""
+        # Mock empty response
+        mock_response = MagicMock()
+        mock_response.data = []
+        mock_client.table.return_value.select.return_value.in_.return_value.execute = (
+            AsyncMock(return_value=mock_response)
         )
 
-        # Mock relationships query response
-        rel_response = MagicMock()
-        rel_response.data = [
-            {
-                "disease_1_id": 1,
-                "disease_2_id": 2,
-                "odds_ratio": 10.5,
-                "p_value": 0.001,
-                "relationship_strength": "very_strong",
-                "disease_2": {"icd_code": "N18", "name_english": "CKD"},
-            }
-        ]
-        mock_client.table.return_value.select.return_value.or_.return_value.execute = (
-            AsyncMock(return_value=rel_response)
-        )
+        names = await calculator._get_disease_names(["UNKNOWN"])
 
-        # Create calculator and request
-        calculator = RiskCalculator(mock_client)
-        request = RiskCalculationRequest(
-            age=50,
-            gender="male",
-            bmi=28.0,
-            existing_conditions=["E11"],
-            exercise_level="light",
-            smoking=False,
-        )
-
-        # Run calculation
-        response = await calculator.calculate_risks(request)
-
-        # Verify response structure
-        assert isinstance(response, RiskCalculationResponse)
-        assert response.total_conditions_analyzed == 1
-        assert isinstance(response.user_position, UserPosition)
-        assert (
-            len(response.risk_scores) > 0 or True
-        )  # May be empty if mock returns no data
+        # Should fall back to the ICD code itself
+        assert names["UNKNOWN"] == "UNKNOWN"
 
 
 if __name__ == "__main__":

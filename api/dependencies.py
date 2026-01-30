@@ -6,7 +6,7 @@ Provides Supabase client and other shared resources.
 """
 
 from typing import AsyncGenerator
-from fastapi import Request, HTTPException, status
+from fastapi import HTTPException, status
 from supabase import AsyncClient, create_async_client
 
 from api.config import get_settings
@@ -44,27 +44,3 @@ async def get_supabase_client() -> AsyncGenerator[AsyncClient, None]:
     finally:
         # Cleanup is handled automatically by Supabase client
         pass
-
-
-def get_supabase_from_request(request: Request) -> AsyncClient:
-    """Get Supabase client from request state.
-
-    Alternative method when client is stored in request state
-    by middleware or app initialization.
-
-    Args:
-        request: FastAPI request object
-
-    Returns:
-        AsyncClient: Supabase client from request state
-
-    Raises:
-        HTTPException: If client not found in request state
-    """
-    client = getattr(request.state, "supabase", None)
-    if not client:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database client not available",
-        )
-    return client

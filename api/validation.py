@@ -8,14 +8,14 @@ All validation functions return boolean status and optional error messages.
 import re
 from typing import Optional, Tuple, Union
 
-
 # ICD-10 code pattern: letter followed by 2 digits, optional decimal and 1-2 digits
 # Examples: E11, E11.9, I10, A01.01
 ICD_CODE_PATTERN = re.compile(r"^[A-Z][0-9]{2}(\.[0-9]{1,2})?$")
 
 # Chapter code pattern: Roman numerals or letters (I, II, X, IX, etc.)
 CHAPTER_CODE_PATTERN = re.compile(
-    r"^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX|XXI|[A-Z])$"
+    r"^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|"
+    r"XVIII|XIX|XX|XXI|[A-Z])$"
 )
 
 # Age group pattern: ranges like "0-9", "10-19", "70-79"
@@ -69,7 +69,8 @@ def validate_icd_code(code: str) -> Tuple[bool, Optional[str]]:
     if not ICD_CODE_PATTERN.match(code):
         return (
             False,
-            "Invalid ICD-10 code format (expected: Letter + 2 digits + optional decimal, e.g., E11 or E11.9)",
+            "Invalid ICD-10 code format "
+            "(expected: Letter + 2 digits + optional decimal, e.g., E11 or E11.9)",
         )
 
     return True, None
@@ -106,7 +107,8 @@ def validate_chapter_code(chapter: str) -> Tuple[bool, Optional[str]]:
     if not CHAPTER_CODE_PATTERN.match(chapter):
         return (
             False,
-            "Invalid chapter code format (expected: Roman numeral I-XXI or single letter, e.g., IX, X, I)",
+            "Invalid chapter code format "
+            "(expected: Roman numeral I-XXI or single letter, e.g., IX, X, I)",
         )
 
     return True, None
@@ -335,7 +337,9 @@ def sanitize_error_message(message: str) -> str:
         Sanitized error message safe for client exposure
 
     Examples:
-        >>> sanitize_error_message("Database connection failed: postgres://user:pass@host/db")
+        >>> sanitize_error_message(
+        ...     "Database connection failed: postgres://user:pass@host/db"
+        ... )
         'Database connection failed'
         >>> sanitize_error_message("File not found: /home/user/.env")
         'File not found'

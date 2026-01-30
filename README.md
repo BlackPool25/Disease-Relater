@@ -75,12 +75,12 @@ Disease-Relater/
 
 - Python 3.10 or higher
 - R 4.0 or higher
-- uv (Python package manager) - recommended
+- uv (Python package manager) - **strongly recommended**
 - Git
 
 ### Installation
 
-#### Option 1: Using uv (Recommended)
+#### Option 1: Using uv (Recommended - Fastest & Most Reliable)
 
 ```bash
 # Install uv if not already installed
@@ -94,21 +94,21 @@ cd Disease-Relater
 uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install Python packages
+# Install Python packages (ultra-fast with uv)
 uv pip install -r requirements.txt
 
 # Or install in editable mode (for development)
 uv pip install -e .
 ```
 
-#### Option 2: Using pip
+#### Option 2: Using pip (Legacy - Slower)
 
 ```bash
 # Create virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
+# Install dependencies (slower than uv)
 pip install -r requirements.txt
 ```
 
@@ -119,7 +119,7 @@ pip install -r requirements.txt
 conda create -n disease-relater python=3.10
 conda activate disease-relater
 
-# Install dependencies
+# Install dependencies via pip
 pip install -r requirements.txt
 ```
 
@@ -380,7 +380,7 @@ source("Scripts/2_Make_NET_Chronic.R")
 source("Scripts/3_Net_Properties.R")
 ```
 
-### 5. FastAPI Server (New)
+### 5. FastAPI Server
 
 Run the FastAPI server for REST API access to disease data and comorbidity networks.
 
@@ -389,10 +389,13 @@ Run the FastAPI server for REST API access to disease data and comorbidity netwo
 cp .env.example .env
 # Edit .env with your Supabase credentials
 
-# 2. Start the development server
+# 2. Install dependencies with uv (recommended)
+uv pip install -r requirements.txt
+
+# 3. Start the development server
 uvicorn api.main:app --reload --port 5000
 
-# 3. Test the health endpoint
+# 4. Test the health endpoint
 curl http://localhost:5000/api/health
 ```
 
@@ -418,7 +421,17 @@ Server settings are loaded from environment variables (see `.env.example`):
 | `HOST` | 0.0.0.0 | Server bind host |
 | `PORT` | 5000 | Server port |
 | `CORS_ORIGINS` | localhost | Allowed origins |
+| `API_RATE_LIMIT` | 100 | Requests per minute per IP |
+| `MAX_REQUEST_SIZE` | 1048576 | Max request size in bytes (1MB) |
 | `DEBUG` | false | Debug mode |
+
+**Security Features:**
+
+- **Rate Limiting**: 100 requests per minute per IP address (configurable via `API_RATE_LIMIT`)
+- **Request Size Limiting**: Maximum 1MB request size (configurable via `MAX_REQUEST_SIZE`)
+- **Error Sanitization**: Error messages are sanitized to prevent information leakage
+- **File Logging**: Errors logged to `logs/api.log` with rotation (10MB max, 5 backups)
+- **CORS Protection**: Configurable allowed origins
 
 ### 6. Complete Workflow
 
@@ -678,10 +691,10 @@ Self-hosted FastAPI server with improved query capabilities:
 
 **Installation:**
 ```bash
-# Using uv (recommended)
+# Using uv (recommended - much faster)
 uv pip install -r requirements.txt
 
-# Or with pip
+# Or with pip (slower)
 pip install fastapi uvicorn pydantic supabase
 ```
 
@@ -752,9 +765,9 @@ Calculate personalized disease risk scores based on existing conditions and demo
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `age` | integer | Yes | Age in years (0-120) |
+| `age` | integer | Yes | Age in years (1-120) |
 | `gender` | string | Yes | "male" or "female" |
-| `bmi` | float | Yes | Body Mass Index (0-100) |
+| `bmi` | float | Yes | Body Mass Index (10-60) |
 | `existing_conditions` | array | Yes | List of ICD-10 codes (1-50 items) |
 | `exercise_level` | string | Yes | "sedentary", "light", "moderate", "active" |
 | `smoking` | boolean | Yes | Current smoking status |
@@ -816,13 +829,39 @@ curl -X POST "http://localhost:5000/api/calculate-risk" \
 
 **Algorithm Overview:**
 
-1. **Base Risk Calculation:** Converts odds ratios from comorbidity relationships to probability-like scores (0-1 range)
-2. **Demographic Modifiers:**
-   - BMI: Overweight (+0.05), Obese (+0.10)
-   - Smoking: +0.15 to all risks
-   - Exercise: Sedentary (+0.05), Active (-0.05)
-   - Age: Elderly 65+ (+0.10), Middle 45+ (+0.05)
-3. **User Position:** Weighted average of 3D disease coordinates using prevalence as weights
+The risk calculator uses a four-stage multiplicative pipeline:
+
+1. **Base Risk (Prevalence):** Uses population prevalence as the base risk score
+   ```
+   base_risk[disease] = prevalence[disease][sex]
+   ```
+
+2. **Comorbidity Multipliers:** Applies multiplicative odds ratios from disease relationships
+   ```
+   risk[disease] *= odds_ratio[existing_condition, disease]
+   ```
+
+3. **Lifestyle Adjustments:** Category-specific multiplicative factors
+   
+   | Category | Factor | Multiplier |
+   |----------|--------|------------|
+   | Metabolic (E) | BMI >= 30 (obese) | 1.5x |
+   | Metabolic (E) | BMI 25-30 (overweight) | 1.2x |
+   | Cardiovascular (I) | Smoking | 1.8x |
+   | Cardiovascular (I) | Sedentary/light exercise | 1.3x |
+   | Cardiovascular (I) | Active exercise | 0.7x (protective) |
+   | Respiratory (J) | Smoking | 1.6x |
+
+4. **Age Adjustments:** Category-specific age multipliers
+   
+   | Age Group | Metabolic | Cardiovascular | Respiratory |
+   |-----------|-----------|----------------|-------------|
+   | Elderly (65+) | 1.3x | 1.5x | 1.2x |
+   | Middle (45-64) | 1.15x | 1.25x | 1.1x |
+   | Young adult (30-44) | 1.0x | 1.0x | 1.0x |
+   | Young (<30) | 0.8x | 0.7x | 0.9x |
+
+5. **User Position:** Weighted average of 3D disease coordinates using prevalence as weights
 
 **Files:**
 - `api/routes/calculate.py` - FastAPI endpoint

@@ -7,10 +7,11 @@ GET endpoint for network data visualization.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from supabase import AsyncClient
 
 from api.dependencies import get_supabase_client
+from api.rate_limit import limiter, get_rate_limit_string
 from api.schemas.network import (
     NetworkEdge,
     NetworkMetadata,
@@ -20,9 +21,14 @@ from api.schemas.network import (
 
 router = APIRouter(prefix="/network", tags=["network"])
 
+# Get rate limit string for decorators
+_rate_limit = get_rate_limit_string()
+
 
 @router.get("", response_model=NetworkResponse)
+@limiter.limit(_rate_limit)
 async def get_network(
+    request: Request,
     min_odds_ratio: float = Query(
         1.5, gt=0, description="Minimum odds ratio for edges"
     ),
@@ -40,7 +46,8 @@ async def get_network(
     """
     # Build nodes query
     nodes_query = client.table("diseases").select(
-        "id, icd_code, name_english, name_german, chapter_code, vector_x, vector_y, vector_z, prevalence_total"
+        "id, icd_code, name_english, name_german, chapter_code, "
+        "vector_x, vector_y, vector_z, prevalence_total"
     )
     nodes_query = nodes_query.eq("has_3d_coordinates", True)
 
@@ -64,8 +71,7 @@ async def get_network(
     # Build edges query
     edges_query = (
         client.table("disease_relationships")
-        .select(
-            """
+        .select("""
             disease_1_id,
             disease_2_id,
             odds_ratio,
@@ -74,8 +80,7 @@ async def get_network(
             patient_count_total,
             disease_1:disease_1_id(icd_code, name_english),
             disease_2:disease_2_id(icd_code, name_english)
-        """
-        )
+        """)
         .gte("odds_ratio", min_odds_ratio)
         .order("odds_ratio", desc=True)
     )

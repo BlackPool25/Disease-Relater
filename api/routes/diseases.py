@@ -7,10 +7,11 @@ GET endpoints for disease listing, search, and detail.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from supabase import AsyncClient
 
 from api.dependencies import get_supabase_client
+from api.rate_limit import limiter, get_rate_limit_string
 from api.schemas.diseases import (
     DiseaseListResponse,
     DiseaseResponse,
@@ -20,9 +21,14 @@ from api.schemas.diseases import (
 
 router = APIRouter(prefix="/diseases", tags=["diseases"])
 
+# Get rate limit string for decorators
+_rate_limit = get_rate_limit_string()
+
 
 @router.get("", response_model=DiseaseListResponse)
+@limiter.limit(_rate_limit)
 async def list_diseases(
+    request: Request,
     chapter: Optional[str] = Query(
         None, description="Filter by ICD chapter code (e.g., IX, X)"
     ),
@@ -82,7 +88,9 @@ async def list_diseases(
 
 
 @router.get("/{disease_id}", response_model=DiseaseResponse)
+@limiter.limit(_rate_limit)
 async def get_disease(
+    request: Request,
     disease_id: str,
     client: AsyncClient = Depends(get_supabase_client),
 ):
@@ -130,7 +138,9 @@ async def get_disease(
 
 
 @router.get("/{disease_id}/related", response_model=list[RelatedDiseaseResponse])
+@limiter.limit(_rate_limit)
 async def get_related_diseases(
+    request: Request,
     disease_id: str,
     limit: int = Query(50, ge=1, le=1000, description="Maximum results"),
     min_odds_ratio: float = Query(1.5, gt=0, description="Minimum odds ratio"),
@@ -161,13 +171,15 @@ async def get_related_diseases(
     # Query relationships
     response = await (
         client.table("disease_relationships")
-        .select(
-            """
+        .select("""
             *,
-            disease_1:disease_1_id(id, icd_code, name_english, name_german, chapter_code),
-            disease_2:disease_2_id(id, icd_code, name_english, name_german, chapter_code)
-        """
-        )
+            disease_1:disease_1_id(
+                id, icd_code, name_english, name_german, chapter_code
+            ),
+            disease_2:disease_2_id(
+                id, icd_code, name_english, name_german, chapter_code
+            )
+        """)
         .or_(f"disease_1_id.eq.{disease_id_int},disease_2_id.eq.{disease_id_int}")
         .gte("odds_ratio", min_odds_ratio)
         .order("odds_ratio", desc=True)
@@ -205,7 +217,9 @@ async def get_related_diseases(
 
 
 @router.get("/search/{search_term}", response_model=list[SearchResultResponse])
+@limiter.limit(_rate_limit)
 async def search_diseases(
+    request: Request,
     search_term: str,
     limit: int = Query(20, ge=1, le=100, description="Maximum results"),
     client: AsyncClient = Depends(get_supabase_client),
@@ -228,7 +242,9 @@ async def search_diseases(
         client.table("diseases")
         .select("*, icd_chapters(chapter_name)")
         .or_(
-            f"name_english.ilike.%{search_term}%,name_german.ilike.%{search_term}%,icd_code.ilike.%{search_term}%"
+            f"name_english.ilike.%{search_term}%,"
+            f"name_german.ilike.%{search_term}%,"
+            f"icd_code.ilike.%{search_term}%"
         )
         .limit(limit)
         .execute()
