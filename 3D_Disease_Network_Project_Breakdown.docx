@@ -1,0 +1,2394 @@
+3D DISEASE COMORBIDITY VISUALIZATION PLATFORM
+PROJECT BREAKDOWN & TASK ISOLATION GUIDE
+
+============================================================
+TABLE OF CONTENTS
+============================================================
+
+PHASE 1: DATA ACQUISITION & PROCESSING
+    Module 1.1: Dataset Download
+    Module 1.2: Data Cleaning & Preprocessing
+    Module 1.3: Data Validation
+
+PHASE 2: BACKEND DEVELOPMENT
+    Module 2.1: Database Schema Design
+    Module 2.2: API Development
+    Module 2.3: Disease Embedding Algorithm
+    Module 2.4: Risk Calculation Engine
+
+PHASE 3: FRONTEND DEVELOPMENT
+    Module 3.1: User Input Form
+    Module 3.2: 3D Visualization Component
+    Module 3.3: UI/UX Design System
+    Module 3.4: Dashboard Layout
+
+PHASE 4: INTEGRATION & TESTING
+    Module 4.1: API Integration
+    Module 4.2: Testing Suite
+    Module 4.3: Performance Optimization
+
+PHASE 5: DEPLOYMENT
+    Module 5.1: Infrastructure Setup
+    Module 5.2: CI/CD Pipeline
+    Module 5.3: Documentation
+
+
+============================================================
+PHASE 1: DATA ACQUISITION & PROCESSING
+============================================================
+
+────────────────────────────────────────────────────────────
+MODULE 1.1: DATASET DOWNLOAD
+────────────────────────────────────────────────────────────
+
+TASK ID: DATA-001
+ASSIGNED TO: Data Team Member A
+ESTIMATED TIME: 2 hours
+DEPENDENCIES: None
+DELIVERABLE: Raw dataset files in designated folder
+
+INSTRUCTIONS:
+1. Go to: https://doi.org/10.6084/m9.figshare.27102553
+2. Download the following files:
+   - Contingency Tables (RDS format)
+   - Adjacency Matrices (CSV format)
+   - Prevalence data (CSV format)
+3. Create folder structure:
+   /data/raw/austrian_dataset/
+   /data/raw/austrian_dataset/contingency/
+   /data/raw/austrian_dataset/matrices/
+   /data/raw/austrian_dataset/prevalence/
+4. Place downloaded files in respective folders
+5. Create a manifest.txt file listing:
+   - File name
+   - File size
+   - Download date
+   - SHA256 checksum
+
+SUCCESS CRITERIA:
+✓ All files downloaded
+✓ Folder structure created
+✓ Manifest file complete
+✓ No corrupted files (verify checksums)
+
+TECHNICAL REQUIREMENTS:
+- Storage: Minimum 500MB free space
+- Tools: Web browser, file manager
+
+OUTPUT FORMAT:
+/data/raw/austrian_dataset/
+├── contingency/
+│   └── [RDS files]
+├── matrices/
+│   └── [CSV files]
+├── prevalence/
+│   └── [CSV files]
+└── manifest.txt
+
+
+────────────────────────────────────────────────────────────
+MODULE 1.2: DATA CLEANING & PREPROCESSING
+────────────────────────────────────────────────────────────
+
+TASK ID: DATA-002
+ASSIGNED TO: Data Team Member B
+ESTIMATED TIME: 8 hours
+DEPENDENCIES: DATA-001
+DELIVERABLE: Cleaned CSV files with disease relationships
+
+INSTRUCTIONS:
+You will receive CSV files containing disease comorbidity data.
+Your job is to clean and standardize this data.
+
+INPUT FILES:
+- /data/raw/austrian_dataset/matrices/*.csv
+- /data/raw/austrian_dataset/prevalence/*.csv
+
+CLEANING STEPS:
+
+Step 1: Load Data
+Write a Python script that:
+- Reads all CSV files from the matrices folder
+- Combines them into a single DataFrame
+- Preserves the following columns:
+  * disease_1_code (ICD10 code)
+  * disease_2_code (ICD10 code)
+  * odds_ratio (numerical value)
+  * p_value (numerical value)
+  * patient_count (integer)
+
+Step 2: Filter Data
+Apply these filters:
+- Remove rows where odds_ratio < 1.5
+- Remove rows where p_value >= 0.05
+- Remove rows where patient_count < 100
+- Remove any duplicate pairs (keep highest odds_ratio)
+
+Step 3: Add Disease Names
+Create a mapping file disease_names.csv with columns:
+- icd10_code (e.g., "E11")
+- disease_name (e.g., "Type 2 Diabetes")
+- icd_chapter (e.g., "E - Endocrine")
+
+Use this resource for mapping:
+https://www.who.int/standards/classifications/classification-of-diseases
+
+Step 4: Validate
+Count and report:
+- Total disease pairs after filtering
+- Number of unique diseases
+- Average odds ratio
+- Distribution across ICD chapters
+
+OUTPUT FILES:
+/data/processed/disease_pairs_clean.csv
+Columns: disease_1_code, disease_1_name, disease_2_code, disease_2_name, odds_ratio, p_value, patient_count
+
+/data/processed/disease_metadata.csv
+Columns: icd10_code, disease_name, icd_chapter, prevalence_rate
+
+/data/processed/processing_report.txt
+Statistics and validation results
+
+PYTHON LIBRARIES NEEDED:
+- pandas
+- numpy
+
+SUCCESS CRITERIA:
+✓ All filters applied correctly
+✓ No null values in output
+✓ Disease names added for all codes
+✓ Output files validated
+✓ Processing report generated
+
+
+────────────────────────────────────────────────────────────
+MODULE 1.3: DATA VALIDATION
+────────────────────────────────────────────────────────────
+
+TASK ID: DATA-003
+ASSIGNED TO: Data Team Member C
+ESTIMATED TIME: 4 hours
+DEPENDENCIES: DATA-002
+DELIVERABLE: Validation report and corrected data
+
+INSTRUCTIONS:
+You will receive cleaned disease relationship data.
+Your job is to validate its quality and correctness.
+
+INPUT FILE:
+- /data/processed/disease_pairs_clean.csv
+
+VALIDATION CHECKS:
+
+Check 1: Symmetry Verification
+For each disease pair (A, B):
+- Verify that pair (B, A) also exists
+- Verify odds ratios are identical
+- Flag any asymmetric pairs
+
+Check 2: Statistical Validation
+- Verify all odds_ratios are >= 1.5
+- Verify all p_values are < 0.05
+- Verify all patient_counts are >= 100
+- Calculate and report quartiles for each metric
+
+Check 3: Medical Plausibility
+Check for known impossible combinations:
+- Pregnancy (O00-O99) with male-only conditions
+- Pediatric conditions (certain P codes) with geriatric conditions
+- Contradictory diagnoses
+
+Check 4: Coverage Analysis
+- Count diseases per ICD chapter
+- Identify chapters with < 5 diseases
+- Report most/least connected diseases
+
+OUTPUT FILES:
+/data/validation/validation_report.json
+{
+  "total_pairs": 12345,
+  "symmetric_pairs": 12340,
+  "asymmetric_pairs": 5,
+  "statistical_pass": true,
+  "implausible_pairs": [],
+  "coverage": {
+    "A": 45,
+    "B": 23,
+    ...
+  }
+}
+
+/data/validation/flagged_pairs.csv
+Pairs that failed validation checks
+
+SUCCESS CRITERIA:
+✓ All validation checks complete
+✓ Asymmetries identified and flagged
+✓ JSON report generated
+✓ Flagged pairs documented
+
+
+============================================================
+PHASE 2: BACKEND DEVELOPMENT
+============================================================
+
+────────────────────────────────────────────────────────────
+MODULE 2.1: DATABASE SCHEMA DESIGN
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-001
+ASSIGNED TO: Backend Developer A
+ESTIMATED TIME: 6 hours
+DEPENDENCIES: DATA-003
+DELIVERABLE: SQL schema files and migration scripts
+
+INSTRUCTIONS:
+Design a database schema to store disease relationships and user data.
+
+TABLES REQUIRED:
+
+Table 1: diseases
+Columns:
+- id (primary key, auto-increment)
+- icd10_code (VARCHAR(10), unique, indexed)
+- disease_name (VARCHAR(255))
+- icd_chapter (VARCHAR(100))
+- prevalence_rate (DECIMAL(10,8))
+- vector_x (DECIMAL(10,6))
+- vector_y (DECIMAL(10,6))
+- vector_z (DECIMAL(10,6))
+- created_at (TIMESTAMP)
+- updated_at (TIMESTAMP)
+
+Table 2: disease_relationships
+Columns:
+- id (primary key)
+- disease_1_id (foreign key -> diseases.id)
+- disease_2_id (foreign key -> diseases.id)
+- odds_ratio (DECIMAL(10,4))
+- p_value (DECIMAL(10,8))
+- patient_count (INTEGER)
+- created_at (TIMESTAMP)
+
+Table 3: user_profiles (optional - for future use)
+Columns:
+- id (primary key)
+- age (INTEGER)
+- gender (VARCHAR(10))
+- height_cm (DECIMAL(5,2))
+- weight_kg (DECIMAL(5,2))
+- exercise_level (VARCHAR(20))
+- created_at (TIMESTAMP)
+
+Table 4: user_risks (optional - for future use)
+Columns:
+- id (primary key)
+- user_profile_id (foreign key -> user_profiles.id)
+- disease_id (foreign key -> diseases.id)
+- risk_score (DECIMAL(5,4))
+- calculated_at (TIMESTAMP)
+
+INDEXES:
+- diseases.icd10_code
+- disease_relationships.disease_1_id
+- disease_relationships.disease_2_id
+- Composite: (disease_1_id, disease_2_id)
+
+OUTPUT FILES:
+/database/schema/001_create_diseases.sql
+/database/schema/002_create_relationships.sql
+/database/schema/003_create_users.sql (optional)
+/database/schema/004_create_indexes.sql
+/database/migrations/run_all.sh
+
+TECHNOLOGY:
+Choose one:
+- PostgreSQL (recommended for production)
+- MySQL
+- SQLite (for development/demo)
+
+SUCCESS CRITERIA:
+✓ All tables defined
+✓ Foreign keys established
+✓ Indexes created
+✓ Migration scripts tested
+✓ Can import cleaned CSV data
+
+
+────────────────────────────────────────────────────────────
+MODULE 2.2: API DEVELOPMENT
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-002
+ASSIGNED TO: Backend Developer B
+ESTIMATED TIME: 12 hours
+DEPENDENCIES: BACKEND-001
+DELIVERABLE: RESTful API with documentation
+
+INSTRUCTIONS:
+Build a RESTful API to serve disease data and calculate risk scores.
+You do NOT need to know how risk is calculated - just implement the endpoints.
+
+TECHNOLOGY STACK:
+Choose one:
+- Node.js + Express
+- Python + Flask/FastAPI
+- Python + Django REST Framework
+
+API ENDPOINTS TO CREATE:
+
+ENDPOINT 1: Get All Diseases
+GET /api/diseases
+Parameters:
+- chapter (optional): ICD chapter filter (e.g., "E")
+- limit (optional): max results (default 100)
+
+Response:
+{
+  "diseases": [
+    {
+      "id": 1,
+      "icd10_code": "E11",
+      "name": "Type 2 Diabetes",
+      "chapter": "E - Endocrine",
+      "prevalence": 0.0823,
+      "vector": {"x": 0.23, "y": -0.45, "z": 0.12}
+    },
+    ...
+  ],
+  "total": 1080
+}
+
+ENDPOINT 2: Get Disease Details
+GET /api/diseases/:id
+Parameters:
+- id: disease ID
+
+Response:
+{
+  "disease": {
+    "id": 1,
+    "icd10_code": "E11",
+    "name": "Type 2 Diabetes",
+    "chapter": "E - Endocrine",
+    "prevalence": 0.0823,
+    "vector": {"x": 0.23, "y": -0.45, "z": 0.12},
+    "related_diseases": [
+      {
+        "id": 25,
+        "name": "Hypertension",
+        "odds_ratio": 3.2,
+        "strength": "high"
+      },
+      ...
+    ]
+  }
+}
+
+ENDPOINT 3: Get Disease Network
+GET /api/network
+Parameters:
+- disease_ids (optional): comma-separated IDs to focus on
+- min_odds_ratio (optional): minimum connection strength
+
+Response:
+{
+  "nodes": [
+    {"id": 1, "name": "...", "vector": {...}},
+    ...
+  ],
+  "edges": [
+    {"source": 1, "target": 25, "odds_ratio": 3.2},
+    ...
+  ]
+}
+
+ENDPOINT 4: Calculate User Risk
+POST /api/calculate-risk
+Request Body:
+{
+  "age": 45,
+  "gender": "male",
+  "bmi": 28.5,
+  "existing_conditions": ["E11", "I10"],
+  "exercise_level": "moderate",
+  "smoking": false
+}
+
+Response:
+{
+  "risk_profile": [
+    {
+      "disease_id": 78,
+      "disease_name": "Coronary Heart Disease",
+      "risk_score": 0.72,
+      "risk_level": "high",
+      "contributing_factors": ["existing diabetes", "high BMI"]
+    },
+    ...
+  ],
+  "vector_position": {"x": 0.45, "y": -0.23, "z": 0.67}
+}
+
+DOCUMENTATION:
+Create OpenAPI/Swagger documentation for all endpoints.
+
+ERROR HANDLING:
+- 400: Invalid parameters
+- 404: Resource not found
+- 500: Server error
+
+OUTPUT FILES:
+/api/server.js (or app.py)
+/api/routes/diseases.js
+/api/routes/network.js
+/api/routes/risk.js
+/api/swagger.yaml
+/api/README.md
+
+SUCCESS CRITERIA:
+✓ All endpoints functional
+✓ Proper error handling
+✓ API documentation complete
+✓ Returns correct data formats
+✓ Can handle concurrent requests
+
+
+────────────────────────────────────────────────────────────
+MODULE 2.3: DISEASE EMBEDDING ALGORITHM
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-003
+ASSIGNED TO: ML Engineer A
+ESTIMATED TIME: 16 hours
+DEPENDENCIES: DATA-003
+DELIVERABLE: Algorithm to map diseases to 3D coordinates
+
+INSTRUCTIONS:
+Create an algorithm that maps diseases into a 3D vector space where:
+- Distance between diseases = strength of comorbidity relationship
+- Closer diseases = more likely to co-occur
+
+You will receive a CSV with disease pairs and their odds ratios.
+Your job is to convert this into 3D coordinates (x, y, z) for each disease.
+
+INPUT FILE:
+/data/processed/disease_pairs_clean.csv
+Columns: disease_1_code, disease_2_code, odds_ratio
+
+ALGORITHM APPROACH:
+
+Method 1: Using t-SNE (Recommended for Starting)
+1. Create a similarity matrix:
+   - Rows/Columns = all unique diseases
+   - Cell [i,j] = odds_ratio if relationship exists, else 0
+2. Apply t-SNE with perplexity=30, n_components=3
+3. Output: 3D coordinates for each disease
+
+Method 2: Using UMAP (Better for Large Datasets)
+1. Create the same similarity matrix
+2. Apply UMAP with n_neighbors=15, n_components=3, metric='precomputed'
+3. Output: 3D coordinates for each disease
+
+Method 3: Graph Embedding (Force-Directed)
+1. Treat diseases as nodes, odds_ratios as edge weights
+2. Use NetworkX spring layout in 3D
+3. Stronger relationships = shorter "springs"
+
+IMPLEMENTATION STEPS:
+
+Step 1: Prepare Similarity Matrix
+import pandas as pd
+import numpy as np
+
+# Load data
+df = pd.read_csv('/data/processed/disease_pairs_clean.csv')
+
+# Get unique diseases
+all_diseases = sorted(set(df['disease_1_code']) | set(df['disease_2_code']))
+
+# Create matrix
+similarity_matrix = pd.DataFrame(0.0, index=all_diseases, columns=all_diseases)
+
+# Fill matrix
+for _, row in df.iterrows():
+    d1, d2, odds = row['disease_1_code'], row['disease_2_code'], row['odds_ratio']
+    similarity_matrix.loc[d1, d2] = odds
+    similarity_matrix.loc[d2, d1] = odds  # Symmetric
+
+Step 2: Apply Dimensionality Reduction
+from sklearn.manifold import TSNE
+
+# Apply t-SNE
+embedder = TSNE(n_components=3, perplexity=30, random_state=42)
+vectors_3d = embedder.fit_transform(similarity_matrix)
+
+# Or use UMAP
+# from umap import UMAP
+# embedder = UMAP(n_components=3, n_neighbors=15, metric='precomputed')
+# vectors_3d = embedder.fit_transform(similarity_matrix)
+
+Step 3: Normalize Coordinates
+Normalize to range [-1, 1] for easier visualization:
+from sklearn.preprocessing import MinMaxScaler
+scaler = MinMaxScaler(feature_range=(-1, 1))
+vectors_normalized = scaler.fit_transform(vectors_3d)
+
+Step 4: Create Output
+output = pd.DataFrame({
+    'icd10_code': all_diseases,
+    'vector_x': vectors_normalized[:, 0],
+    'vector_y': vectors_normalized[:, 1],
+    'vector_z': vectors_normalized[:, 2]
+})
+
+OUTPUT FILES:
+/data/embeddings/disease_vectors_3d.csv
+Columns: icd10_code, vector_x, vector_y, vector_z
+
+/data/embeddings/embedding_metadata.json
+{
+  "method": "t-SNE",
+  "parameters": {
+    "perplexity": 30,
+    "n_components": 3,
+    "random_state": 42
+  },
+  "num_diseases": 1080,
+  "coordinate_range": [-1, 1],
+  "created_at": "2025-01-30T10:00:00Z"
+}
+
+/code/embeddings/generate_embeddings.py
+The complete Python script
+
+VALIDATION:
+Create a visualization script that:
+- Plots diseases in 3D space
+- Colors by ICD chapter
+- Verifies that related diseases cluster together
+
+PYTHON LIBRARIES:
+- pandas
+- numpy
+- scikit-learn
+- umap-learn (optional)
+- matplotlib (for validation)
+
+SUCCESS CRITERIA:
+✓ All diseases have 3D coordinates
+✓ Coordinates normalized to [-1, 1]
+✓ Related diseases are closer in space
+✓ Different disease chapters form clusters
+✓ Reproducible (use random seed)
+
+
+────────────────────────────────────────────────────────────
+MODULE 2.4: RISK CALCULATION ENGINE
+────────────────────────────────────────────────────────────
+
+TASK ID: BACKEND-004
+ASSIGNED TO: ML Engineer B
+ESTIMATED TIME: 20 hours
+DEPENDENCIES: BACKEND-003
+DELIVERABLE: Algorithm to calculate personalized disease risk
+
+INSTRUCTIONS:
+Create a function that takes user health data and returns:
+1. Risk scores for all diseases (0 to 1 scale)
+2. User's position in the 3D disease space
+3. "Vector arrows" showing disease pull
+
+You will receive:
+- User input (age, BMI, existing conditions, etc.)
+- Disease 3D coordinates
+- Disease relationship strengths
+
+Your job is to calculate personalized risk WITHOUT knowing the medical details.
+
+INPUT DATA STRUCTURE:
+
+User Input:
+{
+  "age": 45,
+  "gender": "male",
+  "bmi": 28.5,
+  "existing_conditions": ["E11", "I10"],  // ICD codes
+  "exercise_level": "moderate",  // low/moderate/high
+  "smoking": false,
+  "family_history": ["I25", "E11"]  // optional
+}
+
+Disease Data:
+From /data/embeddings/disease_vectors_3d.csv
+
+Relationship Data:
+From /data/processed/disease_pairs_clean.csv
+
+RISK CALCULATION ALGORITHM:
+
+Step 1: Base Risk Scores
+For each disease:
+- Start with population prevalence as base risk
+- Adjust for age (use age group prevalence if available)
+- Adjust for gender
+
+Step 2: Existing Condition Multiplier
+For each existing condition the user has:
+- Find all related diseases from disease_pairs_clean.csv
+- Multiply their risk by the odds_ratio
+Example: User has diabetes (E11)
+  - Find all diseases related to E11
+  - Disease I25 (Coronary Disease) has odds_ratio 2.5 with E11
+  - Multiply I25's base risk by 2.5
+
+Step 3: Lifestyle Adjustments
+Apply these multipliers:
+- BMI >= 30: multiply metabolic disease risk by 1.5
+- BMI 25-30: multiply metabolic disease risk by 1.2
+- Smoking: multiply cardiovascular/respiratory risk by 1.8
+- Exercise high: multiply cardiovascular risk by 0.7
+- Exercise low: multiply cardiovascular risk by 1.3
+
+Step 4: Calculate User Vector Position
+User's 3D position = weighted average of existing condition positions
+If user has conditions [E11, I10]:
+  - Get their 3D coordinates
+  - Weight by disease severity or just average
+  - Result: user's "current position" in disease space
+
+Step 5: Calculate Disease Pull Vectors
+For each disease:
+- If risk_score > threshold (e.g., 0.3):
+  - Calculate vector from user position to disease position
+  - Scale vector by risk_score
+  - This shows "pull" toward that disease
+
+IMPLEMENTATION:
+
+def calculate_risk(user_data, disease_vectors, disease_relationships):
+    """
+    user_data: dict with age, bmi, existing_conditions, etc.
+    disease_vectors: DataFrame with icd10_code, vector_x, vector_y, vector_z
+    disease_relationships: DataFrame with disease pairs and odds_ratios
+    
+    Returns:
+    {
+      "risk_scores": [
+        {"disease_code": "I25", "risk": 0.72, "level": "high"},
+        ...
+      ],
+      "user_position": {"x": 0.23, "y": -0.15, "z": 0.45},
+      "pull_vectors": [
+        {"disease_code": "I25", "vector": {"x": 0.1, "y": -0.2, "z": 0.05}},
+        ...
+      ]
+    }
+    """
+    
+    # Step 1: Initialize base risks
+    risks = {}
+    for disease in disease_vectors['icd10_code']:
+        risks[disease] = get_base_prevalence(disease)
+    
+    # Step 2: Apply existing condition multipliers
+    for condition in user_data['existing_conditions']:
+        related = disease_relationships[
+            disease_relationships['disease_1_code'] == condition
+        ]
+        for _, row in related.iterrows():
+            disease = row['disease_2_code']
+            odds = row['odds_ratio']
+            risks[disease] *= odds
+    
+    # Step 3: Apply lifestyle adjustments
+    risks = apply_lifestyle_factors(risks, user_data)
+    
+    # Step 4: Cap risks at 1.0 and normalize
+    for disease in risks:
+        risks[disease] = min(risks[disease], 1.0)
+    
+    # Step 5: Calculate user position
+    user_position = calculate_user_position(
+        user_data['existing_conditions'],
+        disease_vectors
+    )
+    
+    # Step 6: Calculate pull vectors
+    pull_vectors = calculate_pull_vectors(
+        user_position,
+        risks,
+        disease_vectors,
+        threshold=0.3
+    )
+    
+    return format_output(risks, user_position, pull_vectors)
+
+OUTPUT FILES:
+/code/risk_engine/calculate_risk.py
+The complete risk calculation implementation
+
+/code/risk_engine/test_risk_engine.py
+Unit tests with sample users
+
+/code/risk_engine/README.md
+Documentation explaining the algorithm
+
+/data/test/sample_risk_calculations.json
+Example outputs for verification
+
+SUCCESS CRITERIA:
+✓ Function takes user data and returns risk scores
+✓ Risk scores are between 0 and 1
+✓ Existing conditions increase related disease risks
+✓ User position calculated correctly
+✓ Pull vectors point toward high-risk diseases
+✓ Results are reproducible
+
+
+============================================================
+PHASE 3: FRONTEND DEVELOPMENT
+============================================================
+
+────────────────────────────────────────────────────────────
+MODULE 3.1: USER INPUT FORM
+────────────────────────────────────────────────────────────
+
+TASK ID: FRONTEND-001
+ASSIGNED TO: Frontend Developer A
+ESTIMATED TIME: 10 hours
+DEPENDENCIES: None (can work standalone)
+DELIVERABLE: User input form component
+
+INSTRUCTIONS:
+Create a form that collects user health data.
+You DO NOT need to know what happens with this data - just collect it.
+
+TECHNOLOGY:
+- React (preferred) OR
+- Vue.js OR
+- Plain HTML/CSS/JavaScript
+
+FORM FIELDS:
+
+Section 1: Demographics
+- Age (number input, 1-120)
+- Gender (dropdown: Male/Female/Other/Prefer not to say)
+- Height (number, cm or ft/in with toggle)
+- Weight (number, kg or lbs with toggle)
+
+Section 2: Health Status
+- Do you have any of these conditions? (multi-select checkboxes)
+  Categories:
+  * Cardiovascular (Heart disease, Hypertension, Stroke history)
+  * Metabolic (Diabetes Type 1, Diabetes Type 2, Thyroid disorders)
+  * Respiratory (Asthma, COPD, Sleep apnea)
+  * Other (Cancer history, Kidney disease, Liver disease)
+  
+- Family History (optional): Same multi-select as above
+
+Section 3: Lifestyle
+- Exercise Level (dropdown: None/Light/Moderate/Heavy)
+  With descriptions:
+  * None: <30 min/week
+  * Light: 30-90 min/week
+  * Moderate: 90-150 min/week
+  * Heavy: >150 min/week
+  
+- Smoking Status (dropdown: Never/Former/Current)
+- Alcohol Consumption (dropdown: None/Occasional/Moderate/Heavy)
+
+Section 4: Additional Info (optional)
+- Diet Type (dropdown: Omnivore/Vegetarian/Vegan/Other)
+- Sleep Quality (slider: 1-10)
+
+VALIDATION RULES:
+- Age: required, 1-120
+- Gender: required
+- Height: required, 50-250 cm
+- Weight: required, 20-300 kg
+- At least one field from each section must be filled
+
+UI REQUIREMENTS:
+- Clean, modern design
+- Mobile responsive
+- Clear section headers
+- Inline validation (show errors immediately)
+- BMI auto-calculation and display
+- "Next" button at bottom
+- Progress indicator (showing step 1 of 3)
+
+OUTPUT FORMAT:
+When user clicks "Next", emit this JSON:
+{
+  "demographics": {
+    "age": 45,
+    "gender": "male",
+    "height_cm": 175,
+    "weight_kg": 85,
+    "bmi": 27.8
+  },
+  "health_status": {
+    "existing_conditions": ["E11", "I10"],
+    "family_history": ["I25"]
+  },
+  "lifestyle": {
+    "exercise_level": "moderate",
+    "smoking": "never",
+    "alcohol": "occasional"
+  },
+  "additional": {
+    "diet": "omnivore",
+    "sleep_quality": 7
+  }
+}
+
+OUTPUT FILES:
+/frontend/components/UserInputForm.jsx (or .vue or .js)
+/frontend/components/UserInputForm.css
+/frontend/components/UserInputForm.test.js
+/frontend/utils/icd10_mapping.js (maps condition names to ICD codes)
+
+ICD10 MAPPING:
+Create this mapping file:
+const conditionMapping = {
+  "Diabetes Type 2": "E11",
+  "Hypertension": "I10",
+  "Coronary Heart Disease": "I25",
+  "Asthma": "J45",
+  // ... etc
+};
+
+SUCCESS CRITERIA:
+✓ Form renders correctly on all screen sizes
+✓ All validations work
+✓ BMI calculates automatically
+✓ Output JSON structure matches specification
+✓ Unit tests pass
+✓ Accessible (keyboard navigation, screen reader compatible)
+
+
+────────────────────────────────────────────────────────────
+MODULE 3.2: 3D VISUALIZATION COMPONENT
+────────────────────────────────────────────────────────────
+
+TASK ID: FRONTEND-002
+ASSIGNED TO: Frontend Developer B
+ESTIMATED TIME: 20 hours
+DEPENDENCIES: None (can work with mock data)
+DELIVERABLE: Interactive 3D disease network visualization
+
+INSTRUCTIONS:
+Create a 3D visualization component that shows diseases as nodes in space.
+You will receive disease coordinates and relationships as JSON.
+You DO NOT need to know how these were calculated - just display them.
+
+TECHNOLOGY:
+Use Three.js with React Three Fiber (recommended) OR plain Three.js
+
+INPUT DATA FORMAT:
+
+You will receive this JSON structure:
+{
+  "nodes": [
+    {
+      "id": "E11",
+      "name": "Type 2 Diabetes",
+      "chapter": "E - Endocrine",
+      "position": {"x": 0.23, "y": -0.45, "z": 0.12},
+      "risk_level": "high"  // high/medium/low/none
+    },
+    ...
+  ],
+  "edges": [
+    {
+      "source": "E11",
+      "target": "I25",
+      "strength": 3.2  // odds ratio
+    },
+    ...
+  ],
+  "user_position": {"x": 0.15, "y": -0.30, "z": 0.08},
+  "pull_vectors": [
+    {
+      "disease": "I25",
+      "direction": {"x": 0.1, "y": -0.2, "z": 0.05}
+    },
+    ...
+  ]
+}
+
+VISUALIZATION REQUIREMENTS:
+
+1. Scene Setup
+- Black or dark blue background
+- Ambient lighting
+- Orbit controls (user can rotate/zoom)
+- Initial camera position: look at origin from (2, 2, 2)
+
+2. Disease Nodes
+- Render as spheres
+- Size based on prevalence (0.02 to 0.1 units)
+- Color based on risk level:
+  * Red: high risk (user has high probability)
+  * Orange: medium risk
+  * Yellow: low risk
+  * Gray: no significant risk
+- Add glow effect for high-risk nodes
+- Show disease name on hover
+
+3. Relationships (Edges)
+- Render as lines between connected nodes
+- Line thickness based on strength (0.001 to 0.005 units)
+- Color: semi-transparent white (opacity 0.3)
+- Only show edges for visible nodes
+
+4. User Position
+- Render as a distinct marker (e.g., blue cube or star)
+- Slightly larger than disease nodes
+- Label: "You are here"
+
+5. Pull Vectors
+- Render as arrows from user position to high-risk diseases
+- Color: gradient from user (blue) to disease (red)
+- Arrow length = risk severity
+- Animate subtle pulsing effect
+
+6. Interactions
+- Click on node: show disease details panel
+  Details:
+  * Disease name
+  * ICD code
+  * Risk level
+  * Related diseases (top 5)
+  * "Learn More" button
+  
+- Hover on node: highlight + show name label
+- Filter controls:
+  * Show/hide edges
+  * Filter by risk level
+  * Filter by ICD chapter
+  * Adjust node size scaling
+
+7. Camera Controls
+- Mouse drag: rotate
+- Scroll: zoom in/out
+- Right-click drag: pan
+- Reset view button
+
+MOCK DATA FOR DEVELOPMENT:
+Create mock_data.json with ~20 diseases for testing:
+{
+  "nodes": [
+    {"id": "E11", "name": "Type 2 Diabetes", "chapter": "E", 
+     "position": {"x": 0.2, "y": 0.3, "z": 0.1}, "risk_level": "high"},
+    {"id": "I10", "name": "Hypertension", "chapter": "I", 
+     "position": {"x": 0.25, "y": 0.28, "z": 0.15}, "risk_level": "high"},
+    // ... 18 more
+  ],
+  "edges": [
+    {"source": "E11", "target": "I10", "strength": 3.2},
+    // ... more
+  ],
+  "user_position": {"x": 0.22, "y": 0.29, "z": 0.12},
+  "pull_vectors": [
+    {"disease": "I25", "direction": {"x": 0.1, "y": -0.05, "z": 0.03}}
+  ]
+}
+
+PERFORMANCE OPTIMIZATION:
+- Use instancing for many nodes
+- Frustum culling for edges
+- LOD (Level of Detail) for distant nodes
+- Limit to 1000 visible nodes maximum
+
+OUTPUT FILES:
+/frontend/components/Disease3DVisualization.jsx
+/frontend/components/DiseaseDetailsPanel.jsx
+/frontend/components/VisualizationControls.jsx
+/frontend/styles/visualization.css
+/frontend/utils/three-helpers.js
+/frontend/data/mock_data.json
+
+LIBRARIES NEEDED:
+- three
+- @react-three/fiber
+- @react-three/drei
+
+SUCCESS CRITERIA:
+✓ Visualization renders smoothly (60 fps)
+✓ All interactions work
+✓ Details panel displays correctly
+✓ User position and pull vectors visible
+✓ Filters work correctly
+✓ Responsive (works on different screen sizes)
+✓ Works with mock data (no API needed yet)
+
+
+────────────────────────────────────────────────────────────
+MODULE 3.3: UI/UX DESIGN SYSTEM
+────────────────────────────────────────────────────────────
+
+TASK ID: FRONTEND-003
+ASSIGNED TO: UI/UX Designer
+ESTIMATED TIME: 12 hours
+DEPENDENCIES: None
+DELIVERABLE: Design system and style guide
+
+INSTRUCTIONS:
+Create a cohesive design system for the entire application.
+You DO NOT need to code anything - just provide designs and specifications.
+
+DELIVERABLES:
+
+1. Color Palette
+Define colors for:
+- Primary color (main brand color)
+- Secondary color
+- Background colors (dark/light mode)
+- Text colors (headings, body, muted)
+- Status colors:
+  * High risk: Red (#E53E3E)
+  * Medium risk: Orange (#DD6B20)
+  * Low risk: Yellow (#D69E2E)
+  * No risk: Gray (#718096)
+  * Success: Green (#38A169)
+  * Info: Blue (#3182CE)
+
+2. Typography
+Define:
+- Font families (heading, body)
+- Font sizes (h1, h2, h3, body, small)
+- Font weights
+- Line heights
+- Letter spacing
+
+3. Spacing System
+Create a consistent spacing scale:
+- XS: 4px
+- SM: 8px
+- MD: 16px
+- LG: 24px
+- XL: 32px
+- 2XL: 48px
+
+4. Component Designs
+Create Figma/Sketch designs for:
+- Input Form (all fields)
+- 3D Visualization container
+- Disease details panel
+- Risk dashboard cards
+- Loading states
+- Error states
+- Empty states
+
+5. Layout Grid
+Define:
+- Desktop breakpoint: 1200px
+- Tablet breakpoint: 768px
+- Mobile breakpoint: 480px
+- Container max-width: 1400px
+- Grid columns: 12
+- Gutter width: 24px
+
+6. Animation Guidelines
+Define transitions for:
+- Button hover: 200ms ease
+- Panel slide-in: 300ms ease-out
+- Loading spinner: 1000ms linear infinite
+- Risk level changes: 500ms ease-in-out
+
+7. Accessibility
+Ensure:
+- WCAG AA color contrast ratios
+- Focus states for all interactive elements
+- Aria labels for icons
+- Keyboard navigation support
+
+OUTPUT FILES:
+/design/style-guide.pdf
+/design/components/input-form.fig
+/design/components/3d-visualization.fig
+/design/components/risk-dashboard.fig
+/design/color-palette.svg
+/design/typography-scale.pdf
+/design/spacing-system.svg
+/design/design-tokens.json
+
+design-tokens.json format:
+{
+  "colors": {
+    "primary": "#3182CE",
+    "secondary": "#805AD5",
+    "risk": {
+      "high": "#E53E3E",
+      "medium": "#DD6B20",
+      "low": "#D69E2E",
+      "none": "#718096"
+    }
+  },
+  "typography": {
+    "fontFamily": {
+      "heading": "Inter, sans-serif",
+      "body": "Inter, sans-serif"
+    },
+    "fontSize": {
+      "h1": "2.5rem",
+      "h2": "2rem",
+      "h3": "1.5rem",
+      "body": "1rem",
+      "small": "0.875rem"
+    }
+  },
+  "spacing": {
+    "xs": "4px",
+    "sm": "8px",
+    "md": "16px",
+    "lg": "24px",
+    "xl": "32px",
+    "2xl": "48px"
+  }
+}
+
+SUCCESS CRITERIA:
+✓ Complete style guide document
+✓ All component designs created
+✓ Design tokens file generated
+✓ Accessibility guidelines included
+✓ Responsive breakpoints defined
+
+
+────────────────────────────────────────────────────────────
+MODULE 3.4: DASHBOARD LAYOUT
+────────────────────────────────────────────────────────────
+
+TASK ID: FRONTEND-004
+ASSIGNED TO: Frontend Developer C
+ESTIMATED TIME: 12 hours
+DEPENDENCIES: FRONTEND-001, FRONTEND-002, FRONTEND-003
+DELIVERABLE: Main application dashboard
+
+INSTRUCTIONS:
+Create the main dashboard that combines all components.
+You will integrate the form, visualization, and risk display.
+
+LAYOUT STRUCTURE:
+
+Desktop Layout (1200px+):
+┌─────────────────────────────────────────────────┐
+│              Header / Navigation                │
+├──────────────┬──────────────────────────────────┤
+│              │                                  │
+│  User Input  │      3D Visualization            │
+│  Form        │      (Main Canvas)               │
+│  (Sidebar)   │                                  │
+│              │                                  │
+│              │                                  │
+├──────────────┴──────────────────────────────────┤
+│            Risk Dashboard Cards                 │
+│  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐       │
+│  │High  │  │Med   │  │Low   │  │Total │       │
+│  │Risk  │  │Risk  │  │Risk  │  │     │       │
+│  └──────┘  └──────┘  └──────┘  └──────┘       │
+└─────────────────────────────────────────────────┘
+
+Mobile Layout (<768px):
+┌─────────────────┐
+│  Header         │
+├─────────────────┤
+│  Input Form     │
+│  (Collapsible)  │
+├─────────────────┤
+│  3D View        │
+│  (Full Width)   │
+├─────────────────┤
+│  Risk Cards     │
+│  (Stacked)      │
+└─────────────────┘
+
+COMPONENTS TO INTEGRATE:
+
+1. Header
+- Logo/Title: "3D Disease Risk Visualizer"
+- Navigation: Home | About | Help
+- Theme toggle (dark/light mode)
+
+2. User Input Sidebar (Desktop) / Collapsible Section (Mobile)
+- Import UserInputForm component
+- "Calculate Risk" button at bottom
+- Loading state while processing
+- Collapsible on mobile (starts collapsed)
+
+3. Main Visualization Area
+- Import Disease3DVisualization component
+- Full height on desktop
+- Fixed height on tablet/mobile (500px)
+- Loading skeleton while data loads
+
+4. Risk Dashboard Cards
+- Four cards showing:
+  a) High Risk Diseases (count + top 3 names)
+  b) Medium Risk Diseases (count + top 3)
+  c) Low Risk Diseases (count)
+  d) Overall Risk Score (0-100)
+  
+- Each card design:
+  ┌────────────────┐
+  │  Icon   Label  │
+  │                │
+  │  Big Number    │
+  │                │
+  │  Details       │
+  └────────────────┘
+
+5. Disease Details Panel (Overlay)
+- Slides in from right when node clicked
+- Shows:
+  * Disease name and ICD code
+  * Risk level indicator
+  * Risk percentage
+  * Related diseases list
+  * Recommendations (placeholder text)
+- Close button (X)
+- Backdrop overlay (semi-transparent)
+
+STATE MANAGEMENT:
+
+App State:
+{
+  "userData": {...},           // from form
+  "diseaseData": {...},        // from API
+  "selectedDisease": null,     // currently clicked
+  "loading": false,
+  "error": null
+}
+
+Workflow:
+1. User fills form → userData updated
+2. User clicks "Calculate" → loading=true, API call
+3. API returns → diseaseData updated, loading=false
+4. User clicks node → selectedDisease updated, panel opens
+5. User clicks close → selectedDisease=null, panel closes
+
+ERROR HANDLING:
+- Form validation errors: inline messages
+- API errors: toast notification + retry button
+- No data: empty state with "Get Started" CTA
+
+OUTPUT FILES:
+/frontend/pages/Dashboard.jsx
+/frontend/components/Header.jsx
+/frontend/components/RiskCard.jsx
+/frontend/components/DiseaseDetailsPanel.jsx
+/frontend/styles/dashboard.css
+/frontend/hooks/useAppState.js
+
+SUCCESS CRITERIA:
+✓ Responsive on all screen sizes
+✓ All components integrate smoothly
+✓ State management works correctly
+✓ Loading and error states handled
+✓ Smooth transitions and animations
+
+
+============================================================
+PHASE 4: INTEGRATION & TESTING
+============================================================
+
+────────────────────────────────────────────────────────────
+MODULE 4.1: API INTEGRATION
+────────────────────────────────────────────────────────────
+
+TASK ID: INTEGRATION-001
+ASSIGNED TO: Full-Stack Developer
+ESTIMATED TIME: 8 hours
+DEPENDENCIES: BACKEND-002, FRONTEND-004
+DELIVERABLE: Frontend connected to backend API
+
+INSTRUCTIONS:
+Connect the frontend dashboard to the backend API.
+You will wire up API calls to fetch data and calculate risks.
+
+API CLIENT SETUP:
+
+Create an API client using axios or fetch:
+
+// /frontend/api/client.js
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+export const apiClient = {
+  
+  // Get all diseases
+  getDiseases: async (params = {}) => {
+    const queryString = new URLSearchParams(params).toString();
+    const response = await fetch(`${API_BASE_URL}/diseases?${queryString}`);
+    return response.json();
+  },
+  
+  // Get disease details
+  getDiseaseDetails: async (id) => {
+    const response = await fetch(`${API_BASE_URL}/diseases/${id}`);
+    return response.json();
+  },
+  
+  // Get disease network
+  getNetwork: async (params = {}) => {
+    const response = await fetch(`${API_BASE_URL}/network?${new URLSearchParams(params)}`);
+    return response.json();
+  },
+  
+  // Calculate user risk
+  calculateRisk: async (userData) => {
+    const response = await fetch(`${API_BASE_URL}/calculate-risk`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(userData)
+    });
+    return response.json();
+  }
+};
+
+INTEGRATION POINTS:
+
+Point 1: Form Submission
+When user clicks "Calculate Risk":
+1. Validate form data
+2. Show loading state
+3. Call apiClient.calculateRisk(userData)
+4. On success: update visualization with response
+5. On error: show error message
+
+Point 2: Visualization Data Loading
+On component mount:
+1. Call apiClient.getNetwork()
+2. Transform response to visualization format
+3. Render visualization
+
+Point 3: Disease Details
+When user clicks a node:
+1. Call apiClient.getDiseaseDetails(diseaseId)
+2. Show details panel with data
+
+DATA TRANSFORMATION:
+
+API Response → Visualization Format:
+
+function transformNetworkData(apiResponse) {
+  return {
+    nodes: apiResponse.diseases.map(d => ({
+      id: d.icd10_code,
+      name: d.name,
+      chapter: d.chapter,
+      position: {
+        x: d.vector.x,
+        y: d.vector.y,
+        z: d.vector.z
+      },
+      risk_level: "none"  // will be updated after risk calculation
+    })),
+    edges: apiResponse.relationships.map(r => ({
+      source: r.disease_1_code,
+      target: r.disease_2_code,
+      strength: r.odds_ratio
+    })),
+    user_position: null,
+    pull_vectors: []
+  };
+}
+
+function updateWithRiskData(networkData, riskResponse) {
+  // Update node risk levels
+  networkData.nodes = networkData.nodes.map(node => ({
+    ...node,
+    risk_level: getRiskLevel(riskResponse, node.id)
+  }));
+  
+  // Add user position
+  networkData.user_position = riskResponse.user_position;
+  
+  // Add pull vectors
+  networkData.pull_vectors = riskResponse.pull_vectors;
+  
+  return networkData;
+}
+
+ERROR HANDLING:
+
+Handle these scenarios:
+- Network error: "Unable to connect. Please check your internet."
+- 400 Bad Request: "Invalid input. Please check your data."
+- 404 Not Found: "Resource not found."
+- 500 Server Error: "Server error. Please try again later."
+- Timeout: "Request timeout. Please try again."
+
+Implement retry logic with exponential backoff:
+- Retry failed requests up to 3 times
+- Wait: 1s, 2s, 4s
+
+CACHING:
+
+Cache these API calls:
+- getDiseases(): cache for 24 hours
+- getNetwork(): cache for 24 hours
+- Disease details: cache for 1 hour
+
+Don't cache:
+- calculateRisk(): always fresh
+
+LOADING STATES:
+
+Show loading indicators for:
+- Initial data load: full-page skeleton
+- Risk calculation: spinner over visualization
+- Disease details: shimmer in panel
+
+OUTPUT FILES:
+/frontend/api/client.js
+/frontend/api/transforms.js
+/frontend/utils/error-handler.js
+/frontend/hooks/useDiseasesData.js
+/frontend/hooks/useRiskCalculation.js
+
+SUCCESS CRITERIA:
+✓ All API endpoints connected
+✓ Data transforms correctly
+✓ Error handling works
+✓ Loading states shown
+✓ Caching implemented
+✓ Retry logic works
+
+
+────────────────────────────────────────────────────────────
+MODULE 4.2: TESTING SUITE
+────────────────────────────────────────────────────────────
+
+TASK ID: INTEGRATION-002
+ASSIGNED TO: QA Engineer
+ESTIMATED TIME: 16 hours
+DEPENDENCIES: All modules
+DELIVERABLE: Comprehensive test suite
+
+INSTRUCTIONS:
+Create tests for all components and functionality.
+You DO NOT need to know implementation details - just test behavior.
+
+TEST CATEGORIES:
+
+1. UNIT TESTS (Jest + React Testing Library)
+
+Test each component in isolation:
+
+UserInputForm.test.js:
+- Renders all form fields
+- Validates age input (1-120)
+- Validates height/weight
+- Calculates BMI correctly
+- Emits correct JSON on submit
+- Shows validation errors
+
+Disease3DVisualization.test.js:
+- Renders with mock data
+- Handles empty data gracefully
+- Node click triggers event
+- Hover shows tooltip
+- Controls work (zoom, rotate)
+
+RiskCard.test.js:
+- Displays count correctly
+- Shows risk level color
+- Handles zero count
+
+API Client tests:
+- Makes correct API calls
+- Handles responses
+- Handles errors
+- Retries failed requests
+
+2. INTEGRATION TESTS
+
+Test component interactions:
+
+Dashboard.test.js:
+- Form submission triggers API call
+- API response updates visualization
+- Error handling works
+- Loading states display
+
+Risk Calculation Flow:
+- Submit form → show loading
+- API call → update visualization
+- Display risk cards
+- Click node → show details
+
+3. E2E TESTS (Cypress or Playwright)
+
+Test complete user journeys:
+
+Journey 1: New User
+1. Open app
+2. Fill form with valid data
+3. Click "Calculate Risk"
+4. Verify visualization appears
+5. Verify risk cards display
+6. Click a high-risk node
+7. Verify details panel opens
+8. Close panel
+9. Change form data
+10. Recalculate
+11. Verify visualization updates
+
+Journey 2: Edge Cases
+- Submit form with minimum values
+- Submit form with maximum values
+- Submit with no existing conditions
+- Submit with many existing conditions
+
+Journey 3: Error Handling
+- Disconnect network during calculation
+- Submit invalid data
+- API returns 500 error
+
+4. PERFORMANCE TESTS
+
+Measure:
+- Initial page load: < 3 seconds
+- Risk calculation: < 5 seconds
+- 3D render with 1000 nodes: 60 fps
+- Memory usage: < 200MB
+
+5. ACCESSIBILITY TESTS
+
+Check:
+- All interactive elements have aria-labels
+- Keyboard navigation works
+- Screen reader compatibility
+- Color contrast meets WCAG AA
+- Focus indicators visible
+
+TEST DATA:
+
+Create test fixtures:
+
+test_users.json:
+{
+  "valid_user": {
+    "age": 45,
+    "gender": "male",
+    "bmi": 28.5,
+    "existing_conditions": ["E11"],
+    "exercise_level": "moderate"
+  },
+  "edge_case_young": {
+    "age": 18,
+    "gender": "female",
+    "bmi": 20,
+    "existing_conditions": [],
+    "exercise_level": "high"
+  },
+  "edge_case_old": {
+    "age": 85,
+    "gender": "male",
+    "bmi": 32,
+    "existing_conditions": ["E11", "I10", "I25"],
+    "exercise_level": "none"
+  }
+}
+
+mock_api_responses.json:
+{
+  "network_success": {...},
+  "network_error": {...},
+  "risk_success": {...},
+  "risk_error": {...}
+}
+
+TEST COVERAGE GOALS:
+- Overall: > 80%
+- Critical paths: 100%
+- Components: > 90%
+- API client: 100%
+
+OUTPUT FILES:
+/tests/unit/components/*.test.js
+/tests/unit/api/*.test.js
+/tests/integration/*.test.js
+/tests/e2e/user-journeys.spec.js
+/tests/fixtures/test_users.json
+/tests/fixtures/mock_api_responses.json
+/tests/coverage-report.html
+
+CI/CD Integration:
+- All tests run on every commit
+- E2E tests run before deployment
+- Coverage report generated
+- Tests must pass to merge
+
+SUCCESS CRITERIA:
+✓ Test coverage > 80%
+✓ All critical paths tested
+✓ E2E tests pass
+✓ Performance benchmarks met
+✓ Accessibility tests pass
+✓ Tests run in CI/CD
+
+
+────────────────────────────────────────────────────────────
+MODULE 4.3: PERFORMANCE OPTIMIZATION
+────────────────────────────────────────────────────────────
+
+TASK ID: INTEGRATION-003
+ASSIGNED TO: Performance Engineer
+ESTIMATED TIME: 12 hours
+DEPENDENCIES: INTEGRATION-002
+DELIVERABLE: Optimized application
+
+INSTRUCTIONS:
+Optimize the application for speed and efficiency.
+Focus on measurable improvements.
+
+OPTIMIZATION TARGETS:
+
+1. INITIAL LOAD TIME
+Current: Unknown
+Target: < 3 seconds on 3G network
+
+Strategies:
+- Code splitting: split by route
+- Lazy load 3D visualization
+- Compress images
+- Minify JS/CSS
+- Use CDN for static assets
+- Enable gzip compression
+- Reduce bundle size:
+  * Tree-shake unused code
+  * Replace large libraries with smaller alternatives
+  * Use dynamic imports
+
+2. 3D RENDERING PERFORMANCE
+Current: Unknown
+Target: 60 fps with 1000 nodes
+
+Strategies:
+- Use instanced meshes for nodes
+- Implement frustum culling
+- Use LOD (Level of Detail)
+- Limit visible nodes to viewport
+- Throttle animation updates
+- Use WebGL optimizations:
+  * Reduce draw calls
+  * Optimize shaders
+  * Use texture atlases
+
+3. API RESPONSE TIME
+Current: Unknown
+Target: < 500ms for risk calculation
+
+Strategies:
+- Database indexing (ensure indexes exist)
+- Cache frequent queries
+- Optimize database queries
+- Use connection pooling
+- Implement request debouncing
+- Compress API responses
+
+4. MEMORY USAGE
+Current: Unknown
+Target: < 200MB total
+
+Strategies:
+- Dispose Three.js objects properly
+- Clear unused data from memory
+- Limit cache size
+- Use weak references where possible
+- Monitor memory leaks
+
+IMPLEMENTATION CHECKLIST:
+
+Frontend Optimizations:
+□ Implement code splitting
+□ Add lazy loading for routes
+□ Optimize 3D rendering (instancing, culling)
+□ Add memoization for expensive calculations
+□ Implement virtual scrolling for long lists
+□ Compress images (use WebP format)
+□ Minify JS and CSS
+□ Enable tree shaking
+
+Backend Optimizations:
+□ Add database indexes
+□ Implement response caching
+□ Enable gzip compression
+□ Optimize database queries
+□ Add request rate limiting
+□ Use connection pooling
+
+Network Optimizations:
+□ Enable HTTP/2
+□ Use CDN for static assets
+□ Implement service worker for caching
+□ Add resource hints (preload, prefetch)
+□ Optimize API payload size
+
+MONITORING:
+
+Set up performance monitoring:
+- Lighthouse score: > 90
+- First Contentful Paint: < 1.5s
+- Time to Interactive: < 3.5s
+- Largest Contentful Paint: < 2.5s
+- Cumulative Layout Shift: < 0.1
+
+Use tools:
+- Chrome DevTools Performance tab
+- Lighthouse
+- WebPageTest
+- Bundle analyzer
+
+BENCHMARKING:
+
+Before/After measurements:
+
+Metric                  | Before | After | Target
+------------------------|--------|-------|-------
+Bundle size (gzipped)   |   ?    |   ?   | < 300KB
+Initial load time       |   ?    |   ?   | < 3s
+Time to interactive     |   ?    |   ?   | < 3.5s
+3D render FPS           |   ?    |   ?   | 60 fps
+Memory usage            |   ?    |   ?   | < 200MB
+API response time       |   ?    |   ?   | < 500ms
+
+OUTPUT FILES:
+/optimization/performance-report.md
+/optimization/lighthouse-results.json
+/optimization/bundle-analysis.html
+/optimization/before-after-comparison.csv
+
+Performance Budget:
+Create and enforce:
+- JS bundle: < 300KB (gzipped)
+- CSS bundle: < 50KB (gzipped)
+- Images: < 200KB total
+- Fonts: < 100KB
+
+SUCCESS CRITERIA:
+✓ Lighthouse score > 90
+✓ Load time < 3s on 3G
+✓ 60 fps during 3D interaction
+✓ API responses < 500ms
+✓ Memory usage < 200MB
+✓ All performance budgets met
+
+
+============================================================
+PHASE 5: DEPLOYMENT
+============================================================
+
+────────────────────────────────────────────────────────────
+MODULE 5.1: INFRASTRUCTURE SETUP
+────────────────────────────────────────────────────────────
+
+TASK ID: DEPLOY-001
+ASSIGNED TO: DevOps Engineer
+ESTIMATED TIME: 12 hours
+DEPENDENCIES: INTEGRATION-003
+DELIVERABLE: Production infrastructure
+
+INSTRUCTIONS:
+Set up cloud infrastructure for hosting the application.
+You DO NOT need to know the application details - just deploy it.
+
+INFRASTRUCTURE COMPONENTS:
+
+1. WEB SERVER
+Options:
+- Vercel (easiest for React)
+- Netlify
+- AWS Amplify
+- DigitalOcean App Platform
+- Traditional VPS (Nginx + PM2)
+
+Recommended: Vercel
+- Zero config for React
+- Auto SSL
+- CDN included
+- Easy deployments
+
+2. API SERVER
+Options:
+- Heroku (easiest)
+- AWS Elastic Beanstalk
+- DigitalOcean App Platform
+- Google Cloud Run
+- Traditional VPS
+
+Recommended: Heroku or Railway
+- Easy deployment
+- Auto scaling
+- Managed database available
+
+3. DATABASE
+Options:
+- Heroku Postgres (if using Heroku)
+- AWS RDS
+- DigitalOcean Managed Database
+- PlanetScale (MySQL)
+- Supabase (PostgreSQL)
+
+Recommended: Supabase
+- Free tier available
+- Built-in APIs
+- Real-time capabilities
+- Easy backups
+
+4. STORAGE (for future file uploads)
+Options:
+- AWS S3
+- DigitalOcean Spaces
+- Cloudinary
+- Vercel Blob
+
+ENVIRONMENT SETUP:
+
+Create three environments:
+
+Development:
+- Local database
+- Local API server
+- Development build of frontend
+
+Staging:
+- Cloud database (separate from prod)
+- Cloud API server
+- Production build of frontend
+- Same config as production
+
+Production:
+- Cloud database
+- Cloud API server
+- Production build with optimizations
+- Monitoring enabled
+
+CONFIGURATION:
+
+Environment Variables:
+
+Frontend (.env):
+REACT_APP_API_URL=https://api.yourdomain.com
+REACT_APP_ENV=production
+REACT_APP_SENTRY_DSN=...
+
+Backend (.env):
+DATABASE_URL=postgresql://...
+PORT=5000
+NODE_ENV=production
+CORS_ORIGIN=https://yourdomain.com
+API_KEY_SECRET=...
+
+SECURITY SETUP:
+
+□ Enable HTTPS (SSL certificates)
+□ Configure CORS properly
+□ Set up firewall rules
+□ Enable rate limiting
+□ Set secure headers:
+  - Content-Security-Policy
+  - X-Frame-Options
+  - X-Content-Type-Options
+□ Hide error details in production
+□ Use environment variables for secrets
+
+MONITORING:
+
+Set up:
+- Uptime monitoring (UptimeRobot or Pingdom)
+- Error tracking (Sentry)
+- Performance monitoring (New Relic or Datadog)
+- Log aggregation (Papertrail or Loggly)
+
+Alerts for:
+- API downtime
+- High error rate
+- Slow response times
+- Database issues
+- High memory/CPU usage
+
+BACKUP STRATEGY:
+
+Database:
+- Automated daily backups
+- Retain for 30 days
+- Test restore procedure monthly
+
+Application:
+- Code in Git (already backed up)
+- Config stored in secret manager
+
+DEPLOYMENT CHECKLIST:
+
+□ Domain registered
+□ DNS configured
+□ SSL certificates installed
+□ Frontend deployed
+□ API deployed
+□ Database provisioned and migrated
+□ Environment variables set
+□ CORS configured
+□ Monitoring setup
+□ Backups enabled
+□ Load testing completed
+
+OUTPUT FILES:
+/infrastructure/terraform/ (or CloudFormation)
+/infrastructure/deployment-guide.md
+/infrastructure/environment-variables.template
+/infrastructure/monitoring-setup.md
+/infrastructure/backup-restore-procedure.md
+
+DNS Configuration:
+yourdomain.com → Frontend (Vercel)
+api.yourdomain.com → API (Heroku)
+
+SUCCESS CRITERIA:
+✓ All services deployed and accessible
+✓ HTTPS enabled
+✓ Monitoring active
+✓ Backups configured
+✓ Load testing passed
+✓ Security scan passed
+
+
+────────────────────────────────────────────────────────────
+MODULE 5.2: CI/CD PIPELINE
+────────────────────────────────────────────────────────────
+
+TASK ID: DEPLOY-002
+ASSIGNED TO: DevOps Engineer
+ESTIMATED TIME: 8 hours
+DEPENDENCIES: DEPLOY-001
+DELIVERABLE: Automated deployment pipeline
+
+INSTRUCTIONS:
+Set up automated testing and deployment.
+Every code push should trigger this pipeline.
+
+PIPELINE STAGES:
+
+Stage 1: Code Quality
+On every push:
+□ Run linter (ESLint)
+□ Run formatter check (Prettier)
+□ Check for security vulnerabilities
+□ Run static analysis
+
+Stage 2: Testing
+On every push:
+□ Run unit tests
+□ Run integration tests
+□ Generate coverage report
+□ Fail if coverage < 80%
+
+Stage 3: Build
+On every push to main:
+□ Build frontend
+□ Build backend
+□ Run security scan on dependencies
+□ Compress and optimize assets
+
+Stage 4: Staging Deployment
+On every push to main:
+□ Deploy to staging environment
+□ Run E2E tests on staging
+□ Run smoke tests
+
+Stage 5: Production Deployment
+On tag push (v1.0.0):
+□ Deploy to production
+□ Run health checks
+□ Send deployment notification
+□ Create release notes
+
+GITHUB ACTIONS WORKFLOW:
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm test -- --coverage
+      - run: npm run test:integration
+
+  build:
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-artifact@v3
+        with:
+          name: build
+          path: build/
+
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy to Staging
+        run: ./scripts/deploy-staging.sh
+      - name: Run E2E Tests
+        run: npm run test:e2e:staging
+
+  deploy-production:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy to Production
+        run: ./scripts/deploy-production.sh
+      - name: Health Check
+        run: ./scripts/health-check.sh
+      - name: Notify Team
+        run: ./scripts/notify-deployment.sh
+
+ROLLBACK PROCEDURE:
+
+If deployment fails:
+1. Automatic: Previous version restored
+2. Manual: Run rollback script
+3. Investigate logs
+4. Fix issue
+5. Redeploy
+
+Rollback script:
+#!/bin/bash
+# rollback.sh
+heroku releases:rollback --app yourapp-prod
+vercel rollback --prod
+
+DEPLOYMENT NOTIFICATIONS:
+
+Send to Slack/Discord:
+- Deployment started
+- Tests passed/failed
+- Deployment succeeded/failed
+- Rollback initiated
+
+Message format:
+🚀 Deployment to Production
+Version: v1.2.3
+Status: ✅ Success
+Deployed by: @username
+Time: 2025-01-30 10:15 UTC
+
+OUTPUT FILES:
+/.github/workflows/ci-cd.yml
+/scripts/deploy-staging.sh
+/scripts/deploy-production.sh
+/scripts/rollback.sh
+/scripts/health-check.sh
+/docs/deployment-guide.md
+
+SUCCESS CRITERIA:
+✓ Pipeline runs on every push
+✓ Tests run automatically
+✓ Staging deploys automatically
+✓ Production deploys on release
+✓ Rollback works
+✓ Notifications sent
+
+
+────────────────────────────────────────────────────────────
+MODULE 5.3: DOCUMENTATION
+────────────────────────────────────────────────────────────
+
+TASK ID: DEPLOY-003
+ASSIGNED TO: Technical Writer
+ESTIMATED TIME: 12 hours
+DEPENDENCIES: All modules
+DELIVERABLE: Complete project documentation
+
+INSTRUCTIONS:
+Create comprehensive documentation for all stakeholders.
+You DO NOT need to understand the code - just document what it does.
+
+DOCUMENTATION STRUCTURE:
+
+1. USER GUIDE
+/docs/user-guide.md
+
+Contents:
+- Introduction: What is this tool?
+- Getting Started: How to use it
+- Step-by-step walkthrough with screenshots
+- Understanding the 3D visualization
+- Reading your risk results
+- FAQs
+- Troubleshooting
+
+2. DEVELOPER GUIDE
+/docs/developer-guide.md
+
+Contents:
+- Project overview and architecture
+- Tech stack
+- Project structure
+- Setup instructions (local development)
+- Environment variables
+- Running tests
+- Code style guide
+- Contributing guidelines
+- Git workflow
+
+3. API DOCUMENTATION
+/docs/api-documentation.md
+
+Contents:
+- API overview
+- Base URL
+- Authentication (if applicable)
+- Endpoints:
+  * GET /api/diseases
+  * GET /api/diseases/:id
+  * GET /api/network
+  * POST /api/calculate-risk
+- Request/response examples
+- Error codes
+- Rate limits
+
+4. DEPLOYMENT GUIDE
+/docs/deployment-guide.md
+
+Contents:
+- Infrastructure overview
+- Prerequisites
+- Environment setup
+- Deployment steps (staging/production)
+- Environment variables
+- Monitoring and logs
+- Backup and restore
+- Rollback procedure
+- Troubleshooting
+
+5. DATA GUIDE
+/docs/data-guide.md
+
+Contents:
+- Data sources (Austrian dataset)
+- Data structure
+- Database schema
+- Data processing pipeline
+- Disease embedding algorithm explanation
+- Risk calculation methodology
+- Data update procedure
+
+6. ARCHITECTURE DOCUMENT
+/docs/architecture.md
+
+Contents:
+- System architecture diagram
+- Component diagram
+- Data flow diagram
+- Technology decisions
+- Security considerations
+- Scalability plan
+
+ADDITIONAL FILES:
+
+README.md (root):
+# 3D Disease Risk Visualizer
+
+Brief description of the project
+
+## Quick Start
+```bash
+npm install
+npm start
+```
+
+## Documentation
+- [User Guide](docs/user-guide.md)
+- [Developer Guide](docs/developer-guide.md)
+- [API Documentation](docs/api-documentation.md)
+
+## License
+MIT
+
+CONTRIBUTING.md:
+# Contributing Guide
+
+How to contribute:
+1. Fork the repository
+2. Create feature branch
+3. Make changes
+4. Run tests
+5. Submit pull request
+
+Code style:
+- Use ESLint config
+- Write tests
+- Update documentation
+
+CHANGELOG.md:
+# Changelog
+
+## [1.0.0] - 2025-01-30
+### Added
+- Initial release
+- 3D disease visualization
+- Risk calculation
+- User input form
+
+DIAGRAMS:
+
+Create these diagrams (using draw.io or Mermaid):
+
+1. System Architecture
+   Frontend ↔ API ↔ Database
+
+2. Data Flow
+   User Input → Risk Engine → 3D Visualization
+
+3. Component Hierarchy
+   App
+   ├── Dashboard
+   │   ├── UserInputForm
+   │   ├── Visualization
+   │   └── RiskCards
+   └── Header
+
+OUTPUT FILES:
+/docs/user-guide.md
+/docs/developer-guide.md
+/docs/api-documentation.md
+/docs/deployment-guide.md
+/docs/data-guide.md
+/docs/architecture.md
+/docs/diagrams/ (architecture, data-flow, components)
+/README.md
+/CONTRIBUTING.md
+/CHANGELOG.md
+/LICENSE
+
+SUCCESS CRITERIA:
+✓ All documentation complete
+✓ Screenshots included in user guide
+✓ API examples provided
+✓ Diagrams created
+✓ README informative
+✓ Contributing guide clear
+
+
+============================================================
+PROJECT COORDINATION
+============================================================
+
+TASK DEPENDENCY GRAPH:
+
+Level 1 (Can start immediately):
+- DATA-001: Dataset Download
+- FRONTEND-003: UI/UX Design
+
+Level 2 (After Level 1):
+- DATA-002: Data Cleaning (after DATA-001)
+- FRONTEND-001: User Input Form (after FRONTEND-003)
+- FRONTEND-002: 3D Visualization (can use mock data)
+
+Level 3:
+- DATA-003: Data Validation (after DATA-002)
+- BACKEND-001: Database Schema (after DATA-002)
+- BACKEND-003: Disease Embedding (after DATA-003)
+- FRONTEND-004: Dashboard Layout (after FRONTEND-001, 002, 003)
+
+Level 4:
+- BACKEND-002: API Development (after BACKEND-001, 003)
+- BACKEND-004: Risk Calculation (after BACKEND-003)
+
+Level 5:
+- INTEGRATION-001: API Integration (after BACKEND-002, FRONTEND-004)
+
+Level 6:
+- INTEGRATION-002: Testing (after INTEGRATION-001)
+- INTEGRATION-003: Performance (after INTEGRATION-001)
+
+Level 7:
+- DEPLOY-001: Infrastructure (after INTEGRATION-003)
+- DEPLOY-002: CI/CD (after INTEGRATION-002)
+- DEPLOY-003: Documentation (after all modules)
+
+
+TEAM COMPOSITION:
+
+Minimum team size: 8 people
+- 2 Data Engineers (DATA modules)
+- 2 Backend Developers (BACKEND modules)
+- 3 Frontend Developers (FRONTEND modules)
+- 1 ML Engineer (embedding + risk algorithms)
+- 1 QA Engineer (INTEGRATION-002)
+- 1 DevOps Engineer (DEPLOY modules)
+- 1 UI/UX Designer (FRONTEND-003)
+- 1 Technical Writer (DEPLOY-003)
+
+Timeline estimate: 8-12 weeks
+- Phase 1 (Data): 2 weeks
+- Phase 2 (Backend): 3 weeks
+- Phase 3 (Frontend): 3 weeks
+- Phase 4 (Integration): 2 weeks
+- Phase 5 (Deployment): 1 week
+
+
+COMMUNICATION PROTOCOL:
+
+Daily:
+- Each person updates their task status
+- Report blockers immediately
+
+Weekly:
+- Team sync meeting
+- Demo progress
+- Adjust timeline if needed
+
+Tools:
+- GitHub for code
+- Jira/Trello for task tracking
+- Slack for communication
+- Figma for designs
+
+
+============================================================
+END OF DOCUMENT
+============================================================
+
+This document provides isolated, self-contained tasks that can be
+distributed to team members without requiring knowledge of the
+entire project. Each module has:
+- Clear inputs and outputs
+- Defined success criteria
+- No dependencies on other modules' implementation details
+
+Each person can work independently on their assigned module.

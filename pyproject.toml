@@ -1,0 +1,66 @@
+[project]
+name = "disease-relater"
+version = "1.0.0"
+description = "Comorbidity Networks Analysis Platform - Python data cleaning pipeline for Austrian hospital patient data"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Elma H. Dervic", email = "dervic@csh.ac.at"},
+]
+keywords = ["comorbidity", "networks", "healthcare", "ICD-10", "epidemiology"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "pyreadr>=0.5.0",
+    "deep-translator>=1.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "sphinx>=7.0.0",
+]
+
+[project.scripts]
+disease-cleaner = "scripts.run_cleaning:main"
+
+[project.urls]
+Homepage = "https://vis.csh.ac.at/comorbidity_networks/"
+Repository = "https://github.com/elmadervic/Comorbidity-Networks-From-Population-Wide-Health-Data"
+Documentation = "https://github.com/elmadervic/Comorbidity-Networks-From-Population-Wide-Health-Data/blob/main/README.md"
+
+[tool.setuptools]
+packages = ["scripts"]
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
