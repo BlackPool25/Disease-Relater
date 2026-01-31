@@ -208,6 +208,111 @@ class TestRiskCalculator:
         assert position.y == 0.0
         assert position.z == 0.0
 
+    def test_calculate_position_missing_coordinates(self, calculator):
+        """Test position calculation with conditions missing 3D coordinates."""
+        conditions = [
+            {
+                "icd_code": "E11",
+                "name_english": "Type 2 diabetes mellitus",
+                "vector_x": None,  # Missing x
+                "vector_y": 0.5,
+                "vector_z": None,  # Missing z
+                "prevalence_total": 0.05,
+            },
+            {
+                "icd_code": "I10",
+                "name_english": "Hypertension",
+                # All coordinates missing
+                "prevalence_total": 0.1,
+            },
+        ]
+        position = calculator._calculate_position(conditions)
+
+        # Should still return valid position (using 0.0 defaults)
+        assert isinstance(position, UserPosition)
+        assert -1.0 <= position.x <= 1.0
+        assert -1.0 <= position.y <= 1.0
+        assert -1.0 <= position.z <= 1.0
+
+    def test_calculate_position_all_zero_prevalence(self, calculator):
+        """Test position calculation with all zero prevalence values."""
+        conditions = [
+            {
+                "icd_code": "E11",
+                "vector_x": 0.5,
+                "vector_y": 0.3,
+                "vector_z": -0.2,
+                "prevalence_total": 0,  # Zero prevalence
+            },
+            {
+                "icd_code": "I10",
+                "vector_x": -0.4,
+                "vector_y": 0.1,
+                "vector_z": 0.6,
+                "prevalence_total": 0,  # Zero prevalence
+            },
+        ]
+        position = calculator._calculate_position(conditions)
+
+        # Should use default weight of 1.0 for each, resulting in simple average
+        assert isinstance(position, UserPosition)
+        # Simple average: x = (0.5 + -0.4) / 2 = 0.05
+        assert position.x == pytest.approx(0.05, abs=0.001)
+
+    def test_calculate_position_single_condition(self, calculator):
+        """Test position calculation with single condition."""
+        conditions = [
+            {
+                "icd_code": "E11",
+                "vector_x": 0.7,
+                "vector_y": -0.3,
+                "vector_z": 0.5,
+                "prevalence_total": 0.042,
+            },
+        ]
+        position = calculator._calculate_position(conditions)
+
+        # Position should equal the single condition's coordinates
+        assert position.x == pytest.approx(0.7, abs=0.001)
+        assert position.y == pytest.approx(-0.3, abs=0.001)
+        assert position.z == pytest.approx(0.5, abs=0.001)
+
+    def test_calculate_position_extreme_coordinates(self, calculator):
+        """Test position calculation with extreme coordinate values outside [-1, 1]."""
+        conditions = [
+            {
+                "icd_code": "E11",
+                "vector_x": 5.0,  # Way outside [-1, 1]
+                "vector_y": -3.0,  # Way outside [-1, 1]
+                "vector_z": 2.5,  # Way outside [-1, 1]
+                "prevalence_total": 1.0,
+            },
+        ]
+        position = calculator._calculate_position(conditions)
+
+        # Coordinates should be clamped to [-1, 1]
+        assert position.x == 1.0
+        assert position.y == -1.0
+        assert position.z == 1.0
+
+    def test_calculate_position_null_prevalence(self, calculator):
+        """Test position calculation with None prevalence values."""
+        conditions = [
+            {
+                "icd_code": "E11",
+                "vector_x": 0.5,
+                "vector_y": 0.5,
+                "vector_z": 0.5,
+                "prevalence_total": None,  # Null prevalence
+            },
+        ]
+        position = calculator._calculate_position(conditions)
+
+        # Should use default weight of 1.0
+        assert position.x == pytest.approx(0.5, abs=0.001)
+        assert position.y == pytest.approx(0.5, abs=0.001)
+        assert position.z == pytest.approx(0.5, abs=0.001)
+
     @pytest.mark.asyncio
     async def test_apply_lifestyle_factors_metabolic_bmi(self, calculator):
         """Test BMI adjustments for metabolic diseases."""
@@ -425,6 +530,59 @@ class TestRiskCalculationResponse:
         assert len(response.risk_scores) == 1
         assert response.total_conditions_analyzed == 2
         assert response.user_position.x == 0.5
+
+
+class TestUserPosition:
+    """Test UserPosition model validation."""
+
+    def test_valid_position(self):
+        """Test creating a valid position within bounds."""
+        position = UserPosition(x=0.5, y=-0.5, z=0.0)
+        assert position.x == 0.5
+        assert position.y == -0.5
+        assert position.z == 0.0
+
+    def test_boundary_values(self):
+        """Test position at boundary values [-1, 1]."""
+        # Test minimum boundaries
+        position_min = UserPosition(x=-1.0, y=-1.0, z=-1.0)
+        assert position_min.x == -1.0
+        assert position_min.y == -1.0
+        assert position_min.z == -1.0
+
+        # Test maximum boundaries
+        position_max = UserPosition(x=1.0, y=1.0, z=1.0)
+        assert position_max.x == 1.0
+        assert position_max.y == 1.0
+        assert position_max.z == 1.0
+
+    def test_out_of_bounds_x(self):
+        """Test that x coordinate outside [-1, 1] is rejected."""
+        with pytest.raises(ValueError):
+            UserPosition(x=1.5, y=0.0, z=0.0)
+        with pytest.raises(ValueError):
+            UserPosition(x=-1.5, y=0.0, z=0.0)
+
+    def test_out_of_bounds_y(self):
+        """Test that y coordinate outside [-1, 1] is rejected."""
+        with pytest.raises(ValueError):
+            UserPosition(x=0.0, y=2.0, z=0.0)
+        with pytest.raises(ValueError):
+            UserPosition(x=0.0, y=-2.0, z=0.0)
+
+    def test_out_of_bounds_z(self):
+        """Test that z coordinate outside [-1, 1] is rejected."""
+        with pytest.raises(ValueError):
+            UserPosition(x=0.0, y=0.0, z=3.0)
+        with pytest.raises(ValueError):
+            UserPosition(x=0.0, y=0.0, z=-3.0)
+
+    def test_origin_position(self):
+        """Test origin position (0, 0, 0)."""
+        position = UserPosition(x=0.0, y=0.0, z=0.0)
+        assert position.x == 0.0
+        assert position.y == 0.0
+        assert position.z == 0.0
 
 
 class TestDiseaseNameResolution:

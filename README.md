@@ -61,7 +61,8 @@ Disease-Relater/
 │   └── export_contingency_tables.R         # R export script (required)
 ├── tests/                                  # Unit and integration tests
 │   ├── __init__.py
-│   └── test_risk_calculator.py             # Risk calculator tests (Agent 3)
+│   ├── test_risk_calculator.py             # Risk calculator tests (Agent 3)
+│   └── test_pull_vectors.py                # Pull vector calculation tests (Agent 2)
 ├── requirements.txt                        # Python dependencies
 ├── pyproject.toml                          # Modern Python project config
 ├── .env.example                            # Environment variable template
@@ -794,6 +795,17 @@ Calculate personalized disease risk scores based on existing conditions and demo
     "y": -0.1452,
     "z": 0.6789
   },
+  "pull_vectors": [
+    {
+      "disease_id": "E13",
+      "disease_name": "Other specified diabetes",
+      "risk": 0.8234,
+      "vector_x": 0.234,
+      "vector_y": -0.156,
+      "vector_z": 0.089,
+      "magnitude": 0.295
+    }
+  ],
   "total_conditions_analyzed": 2,
   "analysis_metadata": {
     "conditions_processed": ["E11", "I10"],
@@ -803,6 +815,26 @@ Calculate personalized disease risk scores based on existing conditions and demo
   }
 }
 ```
+
+**User Position:**
+- `x`, `y`, `z`: Coordinates bounded to [-1.0, 1.0] range
+- Computed as weighted average of existing conditions' 3D disease space coordinates
+- Uses prevalence as weights (defaults to 1.0 if missing)
+
+**Pull Vectors:**
+
+Directional vectors from user position toward high-risk diseases (risk > 0.3), scaled by risk score.
+Used for visualization to show which diseases are "pulling" the user in the 3D disease network space.
+
+| Field | Description |
+|-------|-------------|
+| `disease_id` | ICD-10 code of the high-risk disease |
+| `disease_name` | English name of the disease |
+| `risk` | Risk score that triggered this pull vector |
+| `vector_x/y/z` | Direction components, scaled by risk |
+| `magnitude` | Vector length: sqrt(x² + y² + z²) |
+
+Pull vectors are sorted by magnitude (strongest pull first).
 
 **Risk Levels:**
 
@@ -862,12 +894,16 @@ The risk calculator uses a four-stage multiplicative pipeline:
    | Young (<30) | 0.8x | 0.7x | 0.9x |
 
 5. **User Position:** Weighted average of 3D disease coordinates using prevalence as weights
+   - Input coordinates are validated and clamped to [-1, 1] range
+   - Missing coordinates default to 0.0 with debug logging
+   - Zero/missing prevalence values use default weight of 1.0
+   - Output coordinates are bounded to [-1, 1] range
 
 **Files:**
 - `api/routes/calculate.py` - FastAPI endpoint
 - `api/services/risk_calculator.py` - Calculation logic
-- `api/schemas/calculate.py` - Pydantic models
-- `tests/test_risk_calculator.py` - Unit tests
+- `api/schemas/calculate.py` - Pydantic models with field validation
+- `tests/test_risk_calculator.py` - Unit tests (33 tests)
 
 ### TypeScript Types
 

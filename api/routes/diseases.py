@@ -18,6 +18,7 @@ from api.schemas.diseases import (
     RelatedDiseaseResponse,
     SearchResultResponse,
 )
+from api.validation import validate_search_term
 
 router = APIRouter(prefix="/diseases", tags=["diseases"])
 
@@ -231,20 +232,30 @@ async def search_diseases(
         search_term: Search string (min 2 characters)
         limit: Maximum number of results
     """
-    if len(search_term) < 2:
+    # Validate search term to prevent SQL injection and malicious input
+    is_valid, error_msg = validate_search_term(search_term)
+    if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Search term must be at least 2 characters",
+            detail=error_msg,
         )
 
-    # Search in both name fields and ICD code
+    # Escape special SQL LIKE pattern characters to prevent injection
+    escaped_term = (
+        search_term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+
+    # Use safe ilike pattern matching with properly escaped term
+    # The ilike_any_of pattern format: {pattern1,pattern2,pattern3}
+    pattern = f"%{escaped_term}%"
+
     response = await (
         client.table("diseases")
         .select("*, icd_chapters(chapter_name)")
         .or_(
-            f"name_english.ilike.%{search_term}%,"
-            f"name_german.ilike.%{search_term}%,"
-            f"icd_code.ilike.%{search_term}%"
+            f"name_english.ilike.{pattern},"
+            f"name_german.ilike.{pattern},"
+            f"icd_code.ilike.{pattern}"
         )
         .limit(limit)
         .execute()

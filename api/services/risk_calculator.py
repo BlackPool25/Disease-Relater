@@ -15,6 +15,7 @@ Agent 3: Calculation Engine
 """
 
 import logging
+import math
 from typing import Dict, List, Literal, Any
 
 from api.schemas.calculate import (
@@ -22,6 +23,7 @@ from api.schemas.calculate import (
     RiskCalculationResponse,
     RiskScore,
     UserPosition,
+    PullVector,
 )
 
 logger = logging.getLogger(__name__)
@@ -166,9 +168,15 @@ class RiskCalculator:
         # Step 6: Calculate user position
         user_position = self._calculate_position(conditions)
 
+        # Step 7: Calculate pull vectors toward high-risk diseases
+        pull_vectors = await self._calculate_pull_vectors(
+            final_risks, user_position, threshold=0.3
+        )
+
         return RiskCalculationResponse(
             risk_scores=risk_scores,
             user_position=user_position,
+            pull_vectors=pull_vectors,
             total_conditions_analyzed=len(conditions),
             analysis_metadata={
                 "conditions_processed": [c.get("icd_code") for c in conditions],
@@ -543,6 +551,118 @@ class RiskCalculator:
 
         return adjusted_risks, contributing_factors
 
+    async def _get_disease_coordinates(
+        self, icd_codes: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch fetch 3D coordinates for diseases.
+
+        Retrieves vector_x, vector_y, vector_z coordinates from the database
+        for use in pull vector calculations.
+
+        Args:
+            icd_codes: List of ICD-10 codes to fetch coordinates for
+
+        Returns:
+            Dictionary mapping icd_code -> {x, y, z, name} coordinates
+        """
+        coords: Dict[str, Dict[str, Any]] = {}
+
+        if not icd_codes:
+            return coords
+
+        try:
+            # Batch fetch coordinates
+            response = (
+                await self.client.table("diseases")
+                .select("icd_code, name_english, vector_x, vector_y, vector_z")
+                .in_("icd_code", icd_codes)
+                .execute()
+            )
+
+            if response.data:
+                for disease in response.data:
+                    code = disease["icd_code"]
+                    coords[code] = {
+                        "x": disease.get("vector_x") or 0.0,
+                        "y": disease.get("vector_y") or 0.0,
+                        "z": disease.get("vector_z") or 0.0,
+                        "name": disease.get("name_english") or code,
+                    }
+
+        except Exception as e:
+            self.logger.error(f"Error fetching disease coordinates: {e}")
+
+        return coords
+
+    async def _calculate_pull_vectors(
+        self,
+        risks: Dict[str, float],
+        user_position: UserPosition,
+        threshold: float = 0.3,
+    ) -> List[PullVector]:
+        """Calculate pull vectors from user position toward high-risk diseases.
+
+        For each disease with risk > threshold:
+        1. Get disease 3D coordinates from database
+        2. Calculate vector: (disease_pos - user_pos) * risk
+        3. Compute magnitude: sqrt(x² + y² + z²)
+
+        Args:
+            risks: Dictionary mapping disease_id -> risk score
+            user_position: User's current position in 3D space
+            threshold: Minimum risk score to include (default 0.3)
+
+        Returns:
+            List of PullVector objects for high-risk diseases
+        """
+        pull_vectors: List[PullVector] = []
+
+        # Filter to high-risk diseases only
+        high_risk_codes = [code for code, risk in risks.items() if risk > threshold]
+
+        if not high_risk_codes:
+            return pull_vectors
+
+        # Batch fetch coordinates for all high-risk diseases
+        disease_coords = await self._get_disease_coordinates(high_risk_codes)
+
+        for code in high_risk_codes:
+            if code not in disease_coords:
+                continue
+
+            risk = risks[code]
+            coords = disease_coords[code]
+
+            # Calculate direction vector: disease_pos - user_pos
+            dx = coords["x"] - user_position.x
+            dy = coords["y"] - user_position.y
+            dz = coords["z"] - user_position.z
+
+            # Scale by risk score
+            vector_x = dx * risk
+            vector_y = dy * risk
+            vector_z = dz * risk
+
+            # Calculate magnitude: sqrt(x² + y² + z²)
+            magnitude = math.sqrt(vector_x**2 + vector_y**2 + vector_z**2)
+
+            pull_vectors.append(
+                PullVector(
+                    disease_id=code,
+                    disease_name=str(coords["name"]),
+                    risk=round(risk, 4),
+                    vector_x=round(vector_x, 4),
+                    vector_y=round(vector_y, 4),
+                    vector_z=round(vector_z, 4),
+                    magnitude=round(magnitude, 4),
+                )
+            )
+
+        # Sort by magnitude descending (strongest pull first)
+        pull_vectors.sort(key=lambda pv: pv.magnitude, reverse=True)
+
+        return pull_vectors
+
     async def _convert_to_risk_scores(
         self,
         risks: Dict[str, float],
@@ -614,41 +734,87 @@ class RiskCalculator:
         conditions in the 3D visualization space.
 
         Args:
-            conditions: List of user's conditions with 3D vectors
+            conditions: List of user's conditions with 3D vectors.
+                Each dict should have: vector_x, vector_y, vector_z, prevalence_total
 
         Returns:
-            UserPosition with x, y, z coordinates
+            UserPosition with x, y, z coordinates (bounded to [-1, 1])
         """
+        # Handle empty input - return origin
         if not conditions:
+            logger.debug("No conditions provided, returning origin position")
             return UserPosition(x=0.0, y=0.0, z=0.0)
 
         total_weight = 0.0
         weighted_x = 0.0
         weighted_y = 0.0
         weighted_z = 0.0
+        missing_coords_count = 0
+        zero_weight_count = 0
 
         for condition in conditions:
-            # Use prevalence_total as weight, default to 1.0 if not available
-            weight = condition.get("prevalence_total") or 1.0
+            icd_code = condition.get("icd_code", "unknown")
 
-            # Get 3D coordinates, default to 0 if not available
-            x = condition.get("vector_x") or 0.0
-            y = condition.get("vector_y") or 0.0
-            z = condition.get("vector_z") or 0.0
+            # Get prevalence as weight, log if missing or zero
+            raw_weight = condition.get("prevalence_total")
+            if raw_weight is None or raw_weight == 0:
+                zero_weight_count += 1
+                logger.debug(
+                    f"Missing or zero prevalence for {icd_code}, using default weight=1.0"
+                )
+            weight = raw_weight if raw_weight else 1.0
+
+            # Get 3D coordinates with validation
+            raw_x = condition.get("vector_x")
+            raw_y = condition.get("vector_y")
+            raw_z = condition.get("vector_z")
+
+            # Log and handle missing coordinates
+            if raw_x is None or raw_y is None or raw_z is None:
+                missing_coords_count += 1
+                logger.debug(
+                    f"Missing 3D coordinates for {icd_code}: "
+                    f"x={raw_x}, y={raw_y}, z={raw_z}"
+                )
+
+            # Default missing coords to 0.0
+            x = raw_x if raw_x is not None else 0.0
+            y = raw_y if raw_y is not None else 0.0
+            z = raw_z if raw_z is not None else 0.0
+
+            # Validate coordinate bounds [-1, 1] and clamp if out of range
+            x = max(-1.0, min(1.0, x))
+            y = max(-1.0, min(1.0, y))
+            z = max(-1.0, min(1.0, z))
 
             weighted_x += x * weight
             weighted_y += y * weight
             weighted_z += z * weight
             total_weight += weight
 
+        # Log summary if issues were found
+        if missing_coords_count > 0:
+            logger.warning(
+                f"Position calculation: {missing_coords_count}/{len(conditions)} "
+                "conditions had missing 3D coordinates"
+            )
+        if zero_weight_count > 0:
+            logger.debug(
+                f"Position calculation: {zero_weight_count}/{len(conditions)} "
+                "conditions had zero/missing prevalence"
+            )
+
+        # Handle edge case: all weights are zero (shouldn't happen after defaults)
         if total_weight == 0:
+            logger.warning("Total weight is zero after processing, returning origin")
             return UserPosition(x=0.0, y=0.0, z=0.0)
 
-        return UserPosition(
-            x=round(weighted_x / total_weight, 4),
-            y=round(weighted_y / total_weight, 4),
-            z=round(weighted_z / total_weight, 4),
-        )
+        # Calculate weighted average and clamp output to valid range
+        result_x = max(-1.0, min(1.0, round(weighted_x / total_weight, 4)))
+        result_y = max(-1.0, min(1.0, round(weighted_y / total_weight, 4)))
+        result_z = max(-1.0, min(1.0, round(weighted_z / total_weight, 4)))
+
+        return UserPosition(x=result_x, y=result_y, z=result_z)
 
     def _classify_risk_level(
         self, risk_score: float

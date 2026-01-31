@@ -70,7 +70,8 @@ async def calculate_risk(
         HTTPException: 400 for invalid data, 500 for server errors
     """
     try:
-        logger.info(f"Calculating risk for conditions: {body.existing_conditions}")
+        # Log count only to avoid exposing sensitive medical conditions
+        logger.info(f"Calculating risk for {len(body.existing_conditions)} conditions")
 
         calculator = RiskCalculator(client)
         result = await calculator.calculate_risks(body)

@@ -91,15 +91,49 @@ class RiskScore(BaseModel):
     )
 
 
+class PullVector(BaseModel):
+    """Vector from user position toward a high-risk disease.
+
+    Represents a directional pull in 3D space, scaled by risk score.
+    Used for visualization to show which high-risk diseases are "pulling"
+    the user in the disease network space.
+    """
+
+    disease_id: str = Field(description="ICD-10 code of the high-risk disease")
+    disease_name: str = Field(description="English name of the disease")
+    risk: float = Field(
+        ge=0.0, le=1.0, description="Risk score that triggered this pull vector"
+    )
+    vector_x: float = Field(description="X component of pull vector (scaled by risk)")
+    vector_y: float = Field(description="Y component of pull vector (scaled by risk)")
+    vector_z: float = Field(description="Z component of pull vector (scaled by risk)")
+    magnitude: float = Field(ge=0.0, description="Vector magnitude: sqrt(x² + y² + z²)")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "disease_id": "N18",
+                "disease_name": "Chronic kidney disease",
+                "risk": 0.72,
+                "vector_x": 0.234,
+                "vector_y": -0.156,
+                "vector_z": 0.089,
+                "magnitude": 0.295,
+            }
+        }
+    )
+
+
 class UserPosition(BaseModel):
     """User's position in 3D disease space.
 
     Weighted average of user's existing conditions' 3D coordinates.
+    Coordinates are bounded to [-1.0, 1.0] range.
     """
 
-    x: float = Field(description="X coordinate in 3D space")
-    y: float = Field(description="Y coordinate in 3D space")
-    z: float = Field(description="Z coordinate in 3D space")
+    x: float = Field(ge=-1.0, le=1.0, description="X coordinate in 3D space (-1 to 1)")
+    y: float = Field(ge=-1.0, le=1.0, description="Y coordinate in 3D space (-1 to 1)")
+    z: float = Field(ge=-1.0, le=1.0, description="Z coordinate in 3D space (-1 to 1)")
 
     model_config = ConfigDict(
         json_schema_extra={"example": {"x": -0.145, "y": 0.398, "z": -0.067}}
@@ -109,7 +143,7 @@ class UserPosition(BaseModel):
 class RiskCalculationResponse(BaseModel):
     """Response model for risk calculation endpoint.
 
-    Contains calculated risk scores, user position, and metadata.
+    Contains calculated risk scores, user position, pull vectors, and metadata.
     """
 
     risk_scores: List[RiskScore] = Field(
@@ -117,6 +151,10 @@ class RiskCalculationResponse(BaseModel):
     )
     user_position: UserPosition = Field(
         description="User's position in 3D disease space"
+    )
+    pull_vectors: List[PullVector] = Field(
+        default_factory=list,
+        description="Directional vectors toward high-risk diseases (risk > 0.3)",
     )
     total_conditions_analyzed: int = Field(
         ge=0, description="Total number of conditions analyzed"
@@ -145,6 +183,17 @@ class RiskCalculationResponse(BaseModel):
                     },
                 ],
                 "user_position": {"x": -0.145, "y": 0.398, "z": -0.067},
+                "pull_vectors": [
+                    {
+                        "disease_id": "N18",
+                        "disease_name": "Chronic kidney disease",
+                        "risk": 0.72,
+                        "vector_x": 0.234,
+                        "vector_y": -0.156,
+                        "vector_z": 0.089,
+                        "magnitude": 0.295,
+                    }
+                ],
                 "total_conditions_analyzed": 2,
                 "analysis_metadata": {
                     "calculation_timestamp": "2026-01-30T12:00:00Z",
