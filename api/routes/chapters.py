@@ -22,8 +22,8 @@ _rate_limit = get_rate_limit_string()
 
 
 @router.get("", response_model=list[ChapterResponse])
-@limiter.limit(_rate_limit)
 @cache_response("chapters")
+@limiter.limit(_rate_limit)
 async def list_chapters(
     request: Request,
     client: AsyncClient = Depends(get_supabase_client),

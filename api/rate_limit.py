@@ -9,16 +9,44 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from api.config import get_settings
 
-# Initialize rate limiter with IP-based key function
+
+def get_client_ip_for_rate_limit(request: Request) -> str:
+    """Securely extract client IP for rate limiting.
+
+    Only trusts X-Forwarded-For header when trust_proxy setting is enabled.
+    This prevents IP spoofing attacks that could bypass rate limiting.
+
+    Args:
+        request: The incoming HTTP request
+
+    Returns:
+        Client IP address string for rate limiting key
+    """
+    settings = get_settings()
+
+    # Only trust X-Forwarded-For if explicitly configured to trust proxy
+    if settings.trust_proxy:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            # Take the first IP in the chain (original client)
+            return forwarded_for.split(",")[0].strip()
+
+    # Fall back to direct client host
+    if request.client:
+        return request.client.host
+
+    return "unknown"
+
+
+# Initialize rate limiter with secure IP-based key function
 # Note: headers_enabled is set to False because endpoints returning dicts
 # cannot have headers injected without explicit Response parameter.
 # Rate limit headers are provided in the custom 429 handler when limit is exceeded.
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=get_client_ip_for_rate_limit,
     headers_enabled=False,
 )
 
@@ -27,10 +55,10 @@ def get_rate_limit_string() -> str:
     """Get the rate limit string based on settings.
 
     Returns:
-        Rate limit string in format "N/hour" (e.g., "100/hour")
+        Rate limit string in format "N/minute" (e.g., "100/minute")
     """
     settings = get_settings()
-    return f"{settings.api_rate_limit}/hour"
+    return f"{settings.api_rate_limit}/minute"
 
 
 async def custom_rate_limit_handler(
@@ -51,18 +79,18 @@ async def custom_rate_limit_handler(
     settings = get_settings()
 
     # Extract retry_after value (seconds until reset)
-    retry_after = getattr(exc, "retry_after", 3600)
+    retry_after = getattr(exc, "retry_after", 60)
 
     return JSONResponse(
         status_code=429,
         content={
             "error": {
                 "type": "RateLimitExceeded",
-                "message": f"Rate limit exceeded: {settings.api_rate_limit} requests per hour",
+                "message": f"Rate limit exceeded: {settings.api_rate_limit} requests per minute",
                 "details": {
                     "retry_after_seconds": retry_after,
                     "limit": settings.api_rate_limit,
-                    "period": "hour",
+                    "period": "minute",
                 },
                 "status_code": 429,
             }

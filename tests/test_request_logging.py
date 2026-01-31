@@ -6,7 +6,7 @@ Tests the RequestLoggingMiddleware for proper logging and timing headers.
 
 import logging
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -38,7 +38,9 @@ class TestRequestLoggingMiddleware:
         async def mock_call_next(request):
             return mock_response
 
-        response = await middleware.dispatch(mock_request, mock_call_next)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = False
+            response = await middleware.dispatch(mock_request, mock_call_next)
 
         assert "X-Response-Time" in response.headers
         assert "ms" in response.headers["X-Response-Time"]
@@ -65,7 +67,9 @@ class TestRequestLoggingMiddleware:
             return mock_response
 
         with caplog.at_level(logging.INFO, logger="api.request_logging"):
-            await middleware.dispatch(mock_request, mock_call_next)
+            with patch("api.middleware.request_logging.get_settings") as mock_settings:
+                mock_settings.return_value.trust_proxy = False
+                await middleware.dispatch(mock_request, mock_call_next)
 
         log_messages = [record.message for record in caplog.records]
         request_logged = any(
@@ -95,7 +99,9 @@ class TestRequestLoggingMiddleware:
             return mock_response
 
         with caplog.at_level(logging.INFO, logger="api.request_logging"):
-            await middleware.dispatch(mock_request, mock_call_next)
+            with patch("api.middleware.request_logging.get_settings") as mock_settings:
+                mock_settings.return_value.trust_proxy = False
+                await middleware.dispatch(mock_request, mock_call_next)
 
         log_messages = [record.message for record in caplog.records]
         response_logged = any("201" in msg for msg in log_messages)
@@ -123,7 +129,9 @@ class TestRequestLoggingMiddleware:
             return mock_response
 
         with caplog.at_level(logging.INFO, logger="api.request_logging"):
-            await middleware.dispatch(mock_request, mock_call_next)
+            with patch("api.middleware.request_logging.get_settings") as mock_settings:
+                mock_settings.return_value.trust_proxy = False
+                await middleware.dispatch(mock_request, mock_call_next)
 
         log_messages = [record.message for record in caplog.records]
         # Response log should contain "ms" for milliseconds
@@ -134,8 +142,8 @@ class TestRequestLoggingMiddleware:
 class TestGetClientIP:
     """Tests for _get_client_ip method."""
 
-    def test_returns_direct_client_ip(self):
-        """Should return client IP from request.client."""
+    def test_returns_direct_client_ip_when_trust_proxy_false(self):
+        """Should return direct client IP when trust_proxy is False."""
 
         async def mock_app(scope, receive, send):
             pass
@@ -145,13 +153,17 @@ class TestGetClientIP:
         mock_request = MagicMock(spec=Request)
         mock_request.client = MagicMock()
         mock_request.client.host = "192.168.1.100"
-        mock_request.headers = {}
+        mock_request.headers = {"X-Forwarded-For": "10.0.0.1"}
 
-        result = middleware._get_client_ip(mock_request)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = False
+            result = middleware._get_client_ip(mock_request)
+
+        # Should ignore X-Forwarded-For and return direct client
         assert result == "192.168.1.100"
 
-    def test_respects_x_forwarded_for_header(self):
-        """Should use X-Forwarded-For header when present."""
+    def test_respects_x_forwarded_for_header_when_trust_proxy_true(self):
+        """Should use X-Forwarded-For header when trust_proxy is True."""
 
         async def mock_app(scope, receive, send):
             pass
@@ -163,11 +175,14 @@ class TestGetClientIP:
         mock_request.client.host = "10.0.0.1"
         mock_request.headers = {"X-Forwarded-For": "203.0.113.50, 70.41.3.18"}
 
-        result = middleware._get_client_ip(mock_request)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = True
+            result = middleware._get_client_ip(mock_request)
+
         assert result == "203.0.113.50"
 
     def test_handles_single_x_forwarded_for(self):
-        """Should handle single IP in X-Forwarded-For."""
+        """Should handle single IP in X-Forwarded-For when trust_proxy is True."""
 
         async def mock_app(scope, receive, send):
             pass
@@ -177,7 +192,10 @@ class TestGetClientIP:
         mock_request = MagicMock(spec=Request)
         mock_request.headers = {"X-Forwarded-For": "203.0.113.100"}
 
-        result = middleware._get_client_ip(mock_request)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = True
+            result = middleware._get_client_ip(mock_request)
+
         assert result == "203.0.113.100"
 
     def test_returns_unknown_when_no_client(self):
@@ -192,11 +210,14 @@ class TestGetClientIP:
         mock_request.client = None
         mock_request.headers = {}
 
-        result = middleware._get_client_ip(mock_request)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = False
+            result = middleware._get_client_ip(mock_request)
+
         assert result == "unknown"
 
     def test_strips_whitespace_from_x_forwarded_for(self):
-        """Should strip whitespace from X-Forwarded-For IP."""
+        """Should strip whitespace from X-Forwarded-For IP when trust_proxy is True."""
 
         async def mock_app(scope, receive, send):
             pass
@@ -206,8 +227,55 @@ class TestGetClientIP:
         mock_request = MagicMock(spec=Request)
         mock_request.headers = {"X-Forwarded-For": "  203.0.113.100  , 10.0.0.1"}
 
-        result = middleware._get_client_ip(mock_request)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = True
+            result = middleware._get_client_ip(mock_request)
+
         assert result == "203.0.113.100"
+
+    def test_falls_back_to_direct_ip_when_no_forwarded_header(self):
+        """Should use direct client IP when no X-Forwarded-For header present."""
+
+        async def mock_app(scope, receive, send):
+            pass
+
+        middleware = RequestLoggingMiddleware(mock_app)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.client = MagicMock()
+        mock_request.client.host = "192.168.1.100"
+        mock_request.headers = {}
+
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = True
+            result = middleware._get_client_ip(mock_request)
+
+        assert result == "192.168.1.100"
+
+    def test_spoofing_prevented_when_trust_proxy_false(self):
+        """Should prevent IP spoofing by ignoring X-Forwarded-For when trust_proxy is False.
+
+        This is a security-critical test. When trust_proxy is False, malicious clients
+        cannot spoof their IP by setting a fake X-Forwarded-For header.
+        """
+
+        async def mock_app(scope, receive, send):
+            pass
+
+        middleware = RequestLoggingMiddleware(mock_app)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.client = MagicMock()
+        mock_request.client.host = "192.168.1.100"  # Real IP
+        mock_request.headers = {"X-Forwarded-For": "spoofed.ip.address"}  # Spoofed
+
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = False
+            result = middleware._get_client_ip(mock_request)
+
+        # Must use real client IP, not spoofed header
+        assert result == "192.168.1.100"
+        assert result != "spoofed.ip.address"
 
 
 class TestResponseTimeHeader:
@@ -234,7 +302,9 @@ class TestResponseTimeHeader:
         async def mock_call_next(request):
             return mock_response
 
-        response = await middleware.dispatch(mock_request, mock_call_next)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = False
+            response = await middleware.dispatch(mock_request, mock_call_next)
 
         timing = response.headers["X-Response-Time"]
         # Should end with "ms"
@@ -264,7 +334,9 @@ class TestResponseTimeHeader:
         async def mock_call_next(request):
             return mock_response
 
-        response = await middleware.dispatch(mock_request, mock_call_next)
+        with patch("api.middleware.request_logging.get_settings") as mock_settings:
+            mock_settings.return_value.trust_proxy = False
+            response = await middleware.dispatch(mock_request, mock_call_next)
 
         timing = response.headers["X-Response-Time"]
         numeric_value = float(timing.replace("ms", ""))

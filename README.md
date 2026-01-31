@@ -484,15 +484,16 @@ Server settings are loaded from environment variables (see `.env.example`):
 | `HOST` | 0.0.0.0 | Server bind host |
 | `PORT` | 5000 | Server port |
 | `CORS_ORIGINS` | localhost | Allowed origins |
-| `API_RATE_LIMIT` | 100 | Requests per hour per IP |
+| `API_RATE_LIMIT` | 100 | Requests per minute per IP |
 | `MAX_REQUEST_SIZE` | 1048576 | Max request size in bytes (1MB) |
 | `DEBUG` | false | Debug mode |
 
 **Security Features:**
 
-- **Rate Limiting**: 100 requests per hour per IP address (configurable via `API_RATE_LIMIT`)
+- **Rate Limiting**: 100 requests per minute per IP address (configurable via `API_RATE_LIMIT`)
   - Custom 429 response with structured JSON error format
   - Rate limit headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`
+  - Secure IP extraction: X-Forwarded-For only trusted when `TRUST_PROXY=true`
 - **Request Size Limiting**: Maximum 1MB request size (configurable via `MAX_REQUEST_SIZE`)
 - **Error Sanitization**: Error messages are sanitized to prevent information leakage
 - **CORS Protection**: Configurable allowed origins

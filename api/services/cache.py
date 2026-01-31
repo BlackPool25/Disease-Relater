@@ -186,21 +186,46 @@ class ResponseCache:
             }
 
 
-def add_cache_headers(response: Response, entry: CacheEntry) -> Response:
+def add_cache_headers(
+    response: Response, entry: CacheEntry, cache_status: str = "HIT"
+) -> Response:
     """Add caching headers to a response.
 
     Args:
         response: FastAPI Response object
         entry: CacheEntry with cache metadata
+        cache_status: "HIT" or "MISS" status
 
     Returns:
         Response with caching headers added
     """
     response.headers["Cache-Control"] = f"public, max-age={entry.max_age}"
     response.headers["ETag"] = entry.etag
-    response.headers["X-Cache"] = "HIT"
+    response.headers["X-Cache"] = cache_status
     response.headers["Age"] = str(entry.age)
     return response
+
+
+def get_cache_headers_from_request(request: Request) -> dict[str, str]:
+    """Get cache headers from request state (set by cache_response decorator).
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        Dict of cache headers to add to response, or empty dict if not cached
+    """
+    cache_status = getattr(request.state, "cache_status", None)
+    cache_entry = getattr(request.state, "cache_entry", None)
+
+    if cache_status and cache_entry:
+        return {
+            "Cache-Control": f"public, max-age={cache_entry.max_age}",
+            "ETag": cache_entry.etag,
+            "X-Cache": cache_status,
+            "Age": str(cache_entry.age),
+        }
+    return {}
 
 
 def check_etag_match(request: Request, entry: CacheEntry) -> bool:
@@ -264,6 +289,7 @@ def cache_response(
                 ttl_map = {
                     "diseases_list": settings.cache_diseases_ttl,
                     "disease_detail": settings.cache_disease_detail_ttl,
+                    "disease_related": settings.cache_disease_related_ttl,
                     "network": settings.cache_network_ttl,
                     "chapters": settings.cache_chapters_ttl,
                 }
@@ -277,7 +303,7 @@ def cache_response(
             )
 
             # Build cache key from request path and query params
-            if request:
+            if request is not None:
                 path = request.url.path
                 params = dict(request.query_params)
             else:
@@ -289,7 +315,7 @@ def cache_response(
 
             if entry is not None:
                 # Check for ETag match (304 Not Modified)
-                if request and check_etag_match(request, entry):
+                if request is not None and check_etag_match(request, entry):
                     response = Response(
                         status_code=304,
                         headers={
@@ -300,15 +326,22 @@ def cache_response(
                     )
                     return response
 
+                # Mark request state for cache HIT (for header middleware)
+                if request is not None:
+                    request.state.cache_status = "HIT"
+                    request.state.cache_entry = entry
+
                 # Return cached data
-                # Note: Headers will be added by the route or middleware
                 return entry.data
 
             # Cache miss - call the actual function
             result = await func(*args, **kwargs)
 
-            # Cache the result
-            cache.set(path, params, result)
+            # Cache the result and mark as MISS
+            entry = cache.set(path, params, result)
+            if request is not None:
+                request.state.cache_status = "MISS"
+                request.state.cache_entry = entry
 
             return result
 

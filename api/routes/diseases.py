@@ -30,8 +30,8 @@ _rate_limit = get_rate_limit_string()
 
 
 @router.get("", response_model=DiseaseListResponse)
-@limiter.limit(_rate_limit)
 @cache_response("diseases_list")
+@limiter.limit(_rate_limit)
 async def list_diseases(
     request: Request,
     chapter: Optional[str] = Query(
@@ -93,8 +93,8 @@ async def list_diseases(
 
 
 @router.get("/{disease_id}", response_model=DiseaseResponse)
-@limiter.limit(_rate_limit)
 @cache_response("disease_detail")
+@limiter.limit(_rate_limit)
 async def get_disease(
     request: Request,
     disease_id: str,
@@ -144,6 +144,7 @@ async def get_disease(
 
 
 @router.get("/{disease_id}/related", response_model=list[RelatedDiseaseResponse])
+@cache_response("disease_related")
 @limiter.limit(_rate_limit)
 async def get_related_diseases(
     request: Request,

@@ -43,7 +43,17 @@ class BenchmarkResult:
 
 
 def get_database_connection():
-    """Establish database connection using environment variables."""
+    """Establish database connection using environment variables.
+
+    Environment Variables:
+        SUPABASE_DB_URL: Direct PostgreSQL connection URL (preferred)
+                         Format: postgresql://user:password@host:port/database
+        SUPABASE_URL: Supabase project URL (used to construct DB URL if SUPABASE_DB_URL not set)
+        DB_PASSWORD: Database password (required if not in connection URL)
+
+    Note: SUPABASE_KEY is the API key for the Supabase REST API and should NOT
+    be used as a database password. Use DB_PASSWORD for direct PostgreSQL connections.
+    """
     try:
         import psycopg2
     except ImportError:
@@ -52,24 +62,64 @@ def get_database_connection():
         )
         sys.exit(1)
 
-    db_url = os.getenv("SUPABASE_URL", "")
+    # Prefer direct PostgreSQL URL if available
+    db_url = os.getenv("SUPABASE_DB_URL", "") or os.getenv("SUPABASE_URL", "")
     db_password = os.getenv("DB_PASSWORD", "")
-    db_key = os.getenv("SUPABASE_KEY", "")
 
     if not db_url:
-        logger.error("SUPABASE_URL environment variable not set")
+        logger.error(
+            "Database URL not set. Set SUPABASE_DB_URL or SUPABASE_URL environment variable.\n"
+            "Format: postgresql://user:password@host:port/database"
+        )
         sys.exit(1)
 
     try:
         parsed = urlparse(db_url)
-        conn = psycopg2.connect(
-            host=parsed.hostname,
-            port=parsed.port or 5432,
-            database=parsed.path.lstrip("/") if parsed.path else "postgres",
-            user=parsed.username or "postgres",
-            password=parsed.password or db_password or db_key,
-        )
-        logger.info(f"Connected to database: {parsed.hostname}")
+
+        # Check if this is a Supabase API URL (not a PostgreSQL URL)
+        if parsed.scheme == "https" and "supabase.co" in (parsed.hostname or ""):
+            # Construct PostgreSQL URL from Supabase project URL
+            # Supabase DB host format: db.<project-ref>.supabase.co
+            project_ref = (parsed.hostname or "").replace(".supabase.co", "")
+            db_host = f"db.{project_ref}.supabase.co"
+            logger.info(
+                f"Detected Supabase API URL, constructing DB URL for: {db_host}"
+            )
+
+            if not db_password:
+                logger.error(
+                    "DB_PASSWORD required when using Supabase API URL.\n"
+                    "Set DB_PASSWORD environment variable with your Supabase database password.\n"
+                    "Note: SUPABASE_KEY (API key) is NOT the database password."
+                )
+                sys.exit(1)
+
+            conn = psycopg2.connect(
+                host=db_host,
+                port=5432,
+                database="postgres",
+                user="postgres",
+                password=db_password,
+            )
+        else:
+            # Direct PostgreSQL URL
+            if not parsed.password and not db_password:
+                logger.error(
+                    "Database password required. Either:\n"
+                    "  1. Include password in URL: postgresql://user:password@host:port/db\n"
+                    "  2. Set DB_PASSWORD environment variable"
+                )
+                sys.exit(1)
+
+            conn = psycopg2.connect(
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                database=parsed.path.lstrip("/") if parsed.path else "postgres",
+                user=parsed.username or "postgres",
+                password=parsed.password or db_password,
+            )
+
+        logger.info(f"Connected to database: {parsed.hostname or 'supabase'}")
         return conn
     except Exception as e:
         logger.error(f"Database connection failed: {e}")

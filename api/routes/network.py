@@ -29,8 +29,8 @@ _rate_limit = get_rate_limit_string()
 
 
 @router.get("", response_model=NetworkResponse)
-@limiter.limit(_rate_limit)
 @cache_response("network")
+@limiter.limit(_rate_limit)
 async def get_network(
     request: Request,
     min_odds_ratio: float = Query(

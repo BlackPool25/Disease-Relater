@@ -441,3 +441,146 @@ class TestCacheTTLConfiguration:
         cache = ResponseCache._instances.get("disease_detail")
         assert cache is not None
         assert cache.ttl == 3600
+
+    @pytest.mark.asyncio
+    async def test_disease_related_uses_configured_ttl(self):
+        """disease_related cache should use cache_disease_related_ttl setting."""
+
+        @cache_response("disease_related")
+        async def test_function(request=None):
+            return [{"id": 2, "name": "Related Disease"}]
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.url.path = "/api/diseases/1/related"
+        mock_request.query_params = {}
+        mock_request.headers.get.return_value = None
+
+        with patch("api.services.cache.get_settings") as mock_settings:
+            mock_settings.return_value.cache_enabled = True
+            mock_settings.return_value.cache_diseases_ttl = 86400
+            mock_settings.return_value.cache_disease_detail_ttl = 3600
+            mock_settings.return_value.cache_disease_related_ttl = 3600  # 1h
+            mock_settings.return_value.cache_max_size = 1000
+
+            await test_function(request=mock_request)
+
+        cache = ResponseCache._instances.get("disease_related")
+        assert cache is not None
+        assert cache.ttl == 3600
+
+
+class TestCacheRequestState:
+    """Tests for cache status stored in request state."""
+
+    def setup_method(self):
+        """Clear cache instances before each test."""
+        clear_all_caches()
+        ResponseCache._instances.clear()
+
+    @pytest.mark.asyncio
+    async def test_cache_miss_sets_request_state(self):
+        """Cache miss should set request.state.cache_status to MISS."""
+        from types import SimpleNamespace
+
+        @cache_response("test_miss_state")
+        async def test_function(request=None):
+            return {"data": "result"}
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.url.path = "/api/test"
+        mock_request.query_params = {}
+        mock_request.headers.get.return_value = None
+        mock_request.state = SimpleNamespace()
+
+        with patch("api.services.cache.get_settings") as mock_settings:
+            mock_settings.return_value.cache_enabled = True
+            mock_settings.return_value.cache_diseases_ttl = 3600
+            mock_settings.return_value.cache_disease_detail_ttl = 3600
+            mock_settings.return_value.cache_disease_related_ttl = 3600
+            mock_settings.return_value.cache_network_ttl = 3600
+            mock_settings.return_value.cache_chapters_ttl = 3600
+            mock_settings.return_value.cache_max_size = 1000
+
+            await test_function(request=mock_request)
+
+            assert mock_request.state.cache_status == "MISS"
+            assert mock_request.state.cache_entry is not None
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_sets_request_state(self):
+        """Cache hit should set request.state.cache_status to HIT."""
+        from types import SimpleNamespace
+
+        @cache_response("test_hit_state")
+        async def test_function(request=None):
+            return {"data": "result"}
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.url.path = "/api/test"
+        mock_request.query_params = {}
+        mock_request.headers.get.return_value = None
+        mock_request.state = SimpleNamespace()
+
+        with patch("api.services.cache.get_settings") as mock_settings:
+            mock_settings.return_value.cache_enabled = True
+            mock_settings.return_value.cache_diseases_ttl = 3600
+            mock_settings.return_value.cache_disease_detail_ttl = 3600
+            mock_settings.return_value.cache_disease_related_ttl = 3600
+            mock_settings.return_value.cache_network_ttl = 3600
+            mock_settings.return_value.cache_chapters_ttl = 3600
+            mock_settings.return_value.cache_max_size = 1000
+
+            # First call - cache miss
+            await test_function(request=mock_request)
+            assert mock_request.state.cache_status == "MISS"
+
+            # Second call - cache hit
+            await test_function(request=mock_request)
+            assert mock_request.state.cache_status == "HIT"
+
+
+class TestGetCacheHeadersFromRequest:
+    """Tests for get_cache_headers_from_request function."""
+
+    def test_returns_headers_when_cache_status_set(self):
+        """Should return cache headers when request state has cache info."""
+        from api.services.cache import get_cache_headers_from_request
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.state.cache_status = "HIT"
+        mock_request.state.cache_entry = CacheEntry(
+            data={}, etag='"abc123"', created_at=time.time(), ttl=3600
+        )
+
+        headers = get_cache_headers_from_request(mock_request)
+
+        assert headers["X-Cache"] == "HIT"
+        assert headers["ETag"] == '"abc123"'
+        assert "Cache-Control" in headers
+        assert "Age" in headers
+
+    def test_returns_empty_dict_when_no_cache_status(self):
+        """Should return empty dict when no cache status in request."""
+        from api.services.cache import get_cache_headers_from_request
+
+        mock_request = MagicMock(spec=Request)
+        # Simulate no cache_status attribute
+        del mock_request.state.cache_status
+
+        headers = get_cache_headers_from_request(mock_request)
+
+        assert headers == {}
+
+    def test_returns_miss_status_correctly(self):
+        """Should return MISS status when cache miss occurred."""
+        from api.services.cache import get_cache_headers_from_request
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.state.cache_status = "MISS"
+        mock_request.state.cache_entry = CacheEntry(
+            data={}, etag='"def456"', created_at=time.time(), ttl=3600
+        )
+
+        headers = get_cache_headers_from_request(mock_request)
+
+        assert headers["X-Cache"] == "MISS"

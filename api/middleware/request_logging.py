@@ -12,6 +12,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from api.config import get_settings
+
 # Use a dedicated logger for request logging to enable filtering
 logger = logging.getLogger("api.request_logging")
 
@@ -40,7 +42,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         """
         start_time = time.perf_counter()
 
-        # Get client IP (handle proxy headers)
+        # Get client IP (handle proxy headers securely)
         client_ip = self._get_client_ip(request)
 
         # Log incoming request
@@ -64,7 +66,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_client_ip(self, request: Request) -> str:
-        """Extract client IP from request, respecting X-Forwarded-For header.
+        """Extract client IP from request securely.
+
+        Only trusts X-Forwarded-For header when trust_proxy setting is enabled.
+        This prevents IP spoofing attacks when the application is directly
+        exposed to the internet.
 
         Args:
             request: The incoming HTTP request
@@ -72,11 +78,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         Returns:
             Client IP address string
         """
-        # Check for forwarded header (when behind proxy/load balancer)
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # Take the first IP in the chain (original client)
-            return forwarded_for.split(",")[0].strip()
+        settings = get_settings()
+
+        # Only trust X-Forwarded-For if explicitly configured to trust proxy
+        if settings.trust_proxy:
+            forwarded_for = request.headers.get("X-Forwarded-For")
+            if forwarded_for:
+                # Take the first IP in the chain (original client)
+                return forwarded_for.split(",")[0].strip()
 
         # Fall back to direct client host
         if request.client:

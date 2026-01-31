@@ -80,22 +80,50 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown events.
 
     Handles:
-    - Startup: Load configuration, initialize connections
+    - Startup: Load configuration, initialize Supabase client, verify indexes
     - Shutdown: Cleanup resources, close connections
     """
+    from api.dependencies import (
+        init_supabase_client,
+        close_supabase_client,
+        verify_database_indexes,
+    )
+
     # Startup
     logger.info("Starting Disease-Relater API...")
     settings = get_settings()
     logger.info(f"App: {settings.app_name} v{settings.app_version}")
     logger.info(f"Debug mode: {settings.debug}")
 
-    # TODO: Initialize database connection pool here
+    # Initialize Supabase client (connection pooling via httpx)
+    try:
+        await init_supabase_client()
+        logger.info("Database connection pool initialized")
+    except Exception as e:
+        logger.error(f"Failed to initialize database connection: {e}")
+        # Don't fail startup - allow late initialization for graceful degradation
+        logger.warning("API will attempt to connect to database on first request")
+
+    # Optionally verify database indexes
+    if settings.verify_indexes_on_startup:
+        logger.info("Verifying database indexes...")
+        all_exist, missing = await verify_database_indexes()
+        if not all_exist:
+            logger.warning(
+                f"Some database indexes are missing. Query performance may be degraded. "
+                f"Missing: {', '.join(missing)}"
+            )
+    else:
+        logger.debug(
+            "Index verification disabled. Set VERIFY_INDEXES_ON_STARTUP=true to enable."
+        )
 
     yield
 
     # Shutdown
     logger.info("Shutting down Disease-Relater API...")
-    # TODO: Cleanup resources here
+    await close_supabase_client()
+    logger.info("Cleanup complete")
 
 
 def create_application() -> FastAPI:
