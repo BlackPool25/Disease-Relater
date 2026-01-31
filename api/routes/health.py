@@ -2,15 +2,18 @@
 Health check endpoint for Disease-Relater API.
 
 Provides API health status and database connectivity checks.
+Uses actual database queries to verify connectivity rather than hardcoded values.
 """
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
+from supabase import AsyncClient
 from typing import Dict, Any, Optional
 import logging
 import time
 
 from api.config import get_settings
+from api.dependencies import get_supabase_client
 from api.rate_limit import limiter, get_rate_limit_string
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,35 @@ class HealthCheckResult(BaseModel):
 _server_start_time = time.time()
 
 
+async def _check_database_connectivity(supabase: AsyncClient) -> str:
+    """Check database connectivity with a simple query.
+
+    Performs a lightweight query to verify the database is accessible.
+    Does not expose any sensitive information on failure.
+
+    Args:
+        supabase: Supabase async client
+
+    Returns:
+        "connected" if database is accessible and has data
+        "empty" if database is accessible but has no data
+        "disconnected" if database is not accessible
+    """
+    try:
+        # Simple query to check if database is reachable
+        # Using limit(1) to minimize data transfer
+        result = await supabase.table("diseases").select("icd_code").limit(1).execute()
+
+        if result.data:
+            return "connected"
+        else:
+            return "empty"
+    except Exception as e:
+        # Log the error for debugging but don't expose details to client
+        logger.warning(f"Database connectivity check failed: {e}")
+        return "disconnected"
+
+
 @router.get(
     "/health",
     response_model=HealthResponse,
@@ -52,13 +84,16 @@ _server_start_time = time.time()
     },
 )
 @limiter.limit(_rate_limit)
-async def health_check(request: Request) -> HealthResponse:
+async def health_check(
+    request: Request,
+    supabase: AsyncClient = Depends(get_supabase_client),
+) -> HealthResponse:
     """Get API health status.
 
     Returns basic health information including:
     - API status (healthy/unhealthy)
     - Version information
-    - Database connectivity status
+    - Database connectivity status (verified via actual query)
     - Server uptime
 
     Returns:
@@ -79,9 +114,20 @@ async def health_check(request: Request) -> HealthResponse:
     settings = get_settings()
     uptime = time.time() - _server_start_time
 
-    # Check database connectivity
-    # (placeholder - will be implemented with actual DB checks)
-    db_status = "connected"  # TODO: Add actual DB connectivity check
+    # Verify database connectivity with a simple query
+    db_status = await _check_database_connectivity(supabase)
+
+    # Return unhealthy status if database is disconnected
+    if db_status == "disconnected":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "status": "unhealthy",
+                "version": settings.app_version,
+                "database": db_status,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
 
     return HealthResponse(
         status="healthy",
@@ -100,11 +146,14 @@ async def health_check(request: Request) -> HealthResponse:
     include_in_schema=False,  # Hide from public docs (internal use)
 )
 @limiter.limit(_rate_limit)
-async def health_check_detailed(request: Request) -> HealthCheckResult:
+async def health_check_detailed(
+    request: Request,
+    supabase: AsyncClient = Depends(get_supabase_client),
+) -> HealthCheckResult:
     """Get detailed health status for monitoring.
 
     Returns comprehensive health information for monitoring systems.
-    Includes individual component status checks.
+    Includes individual component status checks with actual database verification.
 
     Returns:
         HealthCheckResult with detailed status
@@ -129,10 +178,24 @@ async def health_check_detailed(request: Request) -> HealthCheckResult:
         logger.error(f"Configuration check failed: {e}")
         checks["config"] = {"status": "error", "message": "Configuration error"}
 
-    # Check database (placeholder)
+    # Check database connectivity with actual query
     try:
-        # TODO: Add actual database connectivity check
-        checks["database"] = {"status": "ok", "message": "Database connection active"}
+        db_status = await _check_database_connectivity(supabase)
+        if db_status == "connected":
+            checks["database"] = {
+                "status": "ok",
+                "message": "Database connection active",
+            }
+        elif db_status == "empty":
+            checks["database"] = {
+                "status": "ok",
+                "message": "Database connected but empty",
+            }
+        else:
+            checks["database"] = {
+                "status": "error",
+                "message": "Database connection failed",
+            }
     except Exception as e:
         logger.error(f"Database check failed: {e}")
         checks["database"] = {
@@ -167,16 +230,28 @@ async def health_check_detailed(request: Request) -> HealthCheckResult:
     },
 )
 @limiter.limit(_rate_limit)
-async def readiness_check(request: Request) -> Dict[str, str]:
+async def readiness_check(
+    request: Request,
+    supabase: AsyncClient = Depends(get_supabase_client),
+) -> Dict[str, str]:
     """Readiness probe for container orchestration.
 
-    Returns 200 when the service is ready to accept traffic,
-    503 when it's not ready (e.g., during startup or shutdown).
+    Returns 200 when the service is ready to accept traffic
+    (database is connected and accessible).
+    Returns 503 when it's not ready (e.g., database unavailable).
 
     Returns:
         Dict with status
     """
-    # TODO: Add actual readiness checks (DB connection, etc.)
+    # Check database connectivity for readiness
+    db_status = await _check_database_connectivity(supabase)
+
+    if db_status == "disconnected":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"status": "not_ready", "reason": "database_unavailable"},
+        )
+
     return {"status": "ready"}
 
 

@@ -69,9 +69,27 @@ class Settings(BaseSettings):
     )
 
     # Security settings
-    api_rate_limit: int = Field(default=100, description="API rate limit per minute")
+    api_rate_limit: int = Field(default=100, description="API rate limit per hour")
     max_request_size: int = Field(
         default=1048576, description="Max request size in bytes (1MB)"
+    )
+
+    # Cache settings (Agent 1 - Response Caching)
+    cache_enabled: bool = Field(default=True, description="Enable response caching")
+    cache_diseases_ttl: int = Field(
+        default=86400, description="Cache TTL for /diseases list (24 hours)"
+    )
+    cache_disease_detail_ttl: int = Field(
+        default=3600, description="Cache TTL for /diseases/:id (1 hour)"
+    )
+    cache_network_ttl: int = Field(
+        default=86400, description="Cache TTL for /network (24 hours)"
+    )
+    cache_chapters_ttl: int = Field(
+        default=3600, description="Cache TTL for /chapters (1 hour)"
+    )
+    cache_max_size: int = Field(
+        default=1000, description="Maximum number of cached responses"
     )
 
     @field_validator("cors_origins", mode="before")

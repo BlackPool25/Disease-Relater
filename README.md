@@ -56,13 +56,18 @@ Disease-Relater/
 │   ├── generate_3d_embeddings.py           # Generate 3D disease coordinates (Module 1.4)
 │   ├── validate_data.py                    # Pre-import data validation (Module 1.5)
 │   ├── import_to_database.py               # PostgreSQL/Supabase import (Module 1.5)
+│   ├── verify_indexes.py                   # Database index verification
+│   ├── benchmark_queries.py                # Query performance benchmarking
 │   ├── db_queries.py                       # Database query functions
 │   ├── demo_3d_embeddings.py               # Demo script for testing embeddings
+│   ├── migrations/                         # SQL migration files
+│   │   └── 001_add_composite_index.sql     # Composite index migration
 │   └── export_contingency_tables.R         # R export script (required)
 ├── tests/                                  # Unit and integration tests
 │   ├── __init__.py
 │   ├── test_risk_calculator.py             # Risk calculator tests (Agent 3)
-│   └── test_pull_vectors.py                # Pull vector calculation tests (Agent 2)
+│   ├── test_pull_vectors.py                # Pull vector calculation tests (Agent 2)
+│   └── test_database_indexes.py            # Database index verification tests
 ├── requirements.txt                        # Python dependencies
 ├── pyproject.toml                          # Modern Python project config
 ├── .env.example                            # Environment variable template
@@ -345,6 +350,63 @@ disease_relationships_stratified: 74,901 rows
 icd_chapters: 21 rows
 ```
 
+#### Database Index Verification
+
+Verify that all required database indexes exist for optimal query performance:
+
+```bash
+# Basic index verification
+python scripts/verify_indexes.py
+
+# Verify indexes and analyze query plans
+python scripts/verify_indexes.py --analyze
+
+# Verbose output with detailed information
+python scripts/verify_indexes.py --verbose
+```
+
+**Required Indexes:**
+- `diseases`: `idx_diseases_icd_code`, `idx_diseases_chapter`, `idx_diseases_granularity`
+- `disease_relationships`: `idx_rel_disease1`, `idx_rel_disease2`, `idx_rel_odds_ratio`, `idx_rel_composite`
+- `prevalence_stratified`: `idx_prev_disease`, `idx_prev_sex`
+
+#### Database Migrations
+
+SQL migration files are stored in `scripts/migrations/`:
+
+```bash
+# Apply the composite index migration manually (if needed)
+psql $SUPABASE_URL -f scripts/migrations/001_add_composite_index.sql
+```
+
+#### Query Performance Benchmarking
+
+Measure query performance to verify index effectiveness:
+
+```bash
+# Run benchmarks with default 5 iterations
+python scripts/benchmark_queries.py
+
+# Run with more iterations for accuracy
+python scripts/benchmark_queries.py --iterations 10
+
+# Verbose output with timing details
+python scripts/benchmark_queries.py --verbose
+```
+
+**Benchmark Output Example:**
+```
+================================================================================
+QUERY BENCHMARK RESULTS
+================================================================================
+Query                                    Avg (ms)     Min (ms)     Max (ms)     Rows    
+--------------------------------------------------------------------------------
+Disease list (first 100)                 5.23         4.12         6.34         100     
+Disease by ICD code                      1.12         0.98         1.45         1       
+Relationships by both IDs (composite)    0.85         0.72         1.02         1       
+================================================================================
+```
+
 ### 4. R Network Analysis Pipeline
 
 The R scripts generate comorbidity networks from contingency tables.
@@ -422,17 +484,25 @@ Server settings are loaded from environment variables (see `.env.example`):
 | `HOST` | 0.0.0.0 | Server bind host |
 | `PORT` | 5000 | Server port |
 | `CORS_ORIGINS` | localhost | Allowed origins |
-| `API_RATE_LIMIT` | 100 | Requests per minute per IP |
+| `API_RATE_LIMIT` | 100 | Requests per hour per IP |
 | `MAX_REQUEST_SIZE` | 1048576 | Max request size in bytes (1MB) |
 | `DEBUG` | false | Debug mode |
 
 **Security Features:**
 
-- **Rate Limiting**: 100 requests per minute per IP address (configurable via `API_RATE_LIMIT`)
+- **Rate Limiting**: 100 requests per hour per IP address (configurable via `API_RATE_LIMIT`)
+  - Custom 429 response with structured JSON error format
+  - Rate limit headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`
 - **Request Size Limiting**: Maximum 1MB request size (configurable via `MAX_REQUEST_SIZE`)
 - **Error Sanitization**: Error messages are sanitized to prevent information leakage
-- **File Logging**: Errors logged to `logs/api.log` with rotation (10MB max, 5 backups)
 - **CORS Protection**: Configurable allowed origins
+
+**Logging & Monitoring:**
+
+- **Request Logging**: All requests logged with method, path, client IP, and response time
+- **Response Time Header**: `X-Response-Time` header added to all responses (in milliseconds)
+- **File Logging**: Requests and errors logged to `logs/api.log` with rotation (10MB max, 5 backups)
+- **Log Format**: `%(asctime)s - %(name)s - %(levelname)s - %(message)s`
 
 ### 6. Complete Workflow
 

@@ -3,6 +3,8 @@ Chapters Routes
 
 Agent 2: GET Endpoints Implementation
 GET endpoint for ICD chapters listing.
+
+Agent 1: Added response caching for GET endpoint.
 """
 
 from fastapi import APIRouter, Depends, Request
@@ -11,6 +13,7 @@ from supabase import AsyncClient
 from api.dependencies import get_supabase_client
 from api.rate_limit import limiter, get_rate_limit_string
 from api.schemas.diseases import ChapterResponse
+from api.services.cache import cache_response
 
 router = APIRouter(prefix="/chapters", tags=["chapters"])
 
@@ -20,6 +23,7 @@ _rate_limit = get_rate_limit_string()
 
 @router.get("", response_model=list[ChapterResponse])
 @limiter.limit(_rate_limit)
+@cache_response("chapters")
 async def list_chapters(
     request: Request,
     client: AsyncClient = Depends(get_supabase_client),
@@ -31,11 +35,15 @@ async def list_chapters(
     average prevalence statistics.
     """
     # Query chapters with disease counts using the view or manual join
-    response = await client.table("icd_chapters").select("""
+    response = (
+        await client.table("icd_chapters")
+        .select("""
             chapter_code,
             chapter_name,
             diseases(count)
-        """).execute()
+        """)
+        .execute()
+    )
 
     if not response.data:
         return []

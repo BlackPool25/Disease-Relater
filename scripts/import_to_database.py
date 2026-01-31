@@ -112,6 +112,8 @@ INDEX_DEFINITIONS = {
         "CREATE INDEX IF NOT EXISTS idx_rel_disease1 ON disease_relationships(disease_1_id);",
         "CREATE INDEX IF NOT EXISTS idx_rel_disease2 ON disease_relationships(disease_2_id);",
         "CREATE INDEX IF NOT EXISTS idx_rel_odds_ratio ON disease_relationships(odds_ratio_avg);",
+        # Composite index for efficient relationship lookups by both disease IDs
+        "CREATE INDEX IF NOT EXISTS idx_rel_composite ON disease_relationships(disease_1_id, disease_2_id);",
     ],
     "prevalence_stratified": [
         "CREATE INDEX IF NOT EXISTS idx_prev_disease ON prevalence_stratified(disease_id);",

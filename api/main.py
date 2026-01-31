@@ -13,13 +13,13 @@ from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from api.config import get_settings
 from api.middleware.error_handlers import setup_exception_handlers
-from api.rate_limit import limiter, get_rate_limit_string
+from api.middleware.request_logging import RequestLoggingMiddleware
+from api.rate_limit import limiter, get_rate_limit_string, custom_rate_limit_handler
 from api.routes import calculate, chapters, diseases, health, network
 
 # OpenAPI tags metadata for organized API documentation
@@ -63,10 +63,10 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
-# Add rotating file handler for error logging
+# Add rotating file handler for request/error logging (INFO level for request tracking)
 os.makedirs("logs", exist_ok=True)
 file_handler = RotatingFileHandler("logs/api.log", maxBytes=10_000_000, backupCount=5)
-file_handler.setLevel(logging.ERROR)
+file_handler.setLevel(logging.INFO)  # Log INFO and above to file for request tracking
 file_handler.setFormatter(
     logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 )
@@ -154,9 +154,9 @@ def create_application() -> FastAPI:
     # Setup exception handlers
     setup_exception_handlers(app)
 
-    # Add rate limiting middleware
+    # Add rate limiting middleware with custom 429 handler
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
     app.add_middleware(SlowAPIMiddleware)
 
     # Add CORS middleware
@@ -167,6 +167,9 @@ def create_application() -> FastAPI:
         allow_methods=settings.cors_allow_methods,
         allow_headers=settings.cors_allow_headers,
     )
+
+    # Add request logging middleware (logs requests with timing info)
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Add compression middleware
     app.add_middleware(GZipMiddleware, minimum_size=1000)

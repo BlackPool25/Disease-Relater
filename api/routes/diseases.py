@@ -3,6 +3,8 @@ Diseases Routes
 
 Agent 2: GET Endpoints Implementation
 GET endpoints for disease listing, search, and detail.
+
+Agent 1: Added response caching for GET endpoints.
 """
 
 from typing import Optional
@@ -18,6 +20,7 @@ from api.schemas.diseases import (
     RelatedDiseaseResponse,
     SearchResultResponse,
 )
+from api.services.cache import cache_response
 from api.validation import validate_search_term
 
 router = APIRouter(prefix="/diseases", tags=["diseases"])
@@ -28,6 +31,7 @@ _rate_limit = get_rate_limit_string()
 
 @router.get("", response_model=DiseaseListResponse)
 @limiter.limit(_rate_limit)
+@cache_response("diseases_list")
 async def list_diseases(
     request: Request,
     chapter: Optional[str] = Query(
@@ -90,6 +94,7 @@ async def list_diseases(
 
 @router.get("/{disease_id}", response_model=DiseaseResponse)
 @limiter.limit(_rate_limit)
+@cache_response("disease_detail")
 async def get_disease(
     request: Request,
     disease_id: str,

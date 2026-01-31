@@ -3,6 +3,8 @@ Network Routes
 
 Agent 2: GET Endpoints Implementation
 GET endpoint for network data visualization.
+
+Agent 1: Added response caching for GET endpoint.
 """
 
 from typing import Optional
@@ -18,6 +20,7 @@ from api.schemas.network import (
     NetworkNode,
     NetworkResponse,
 )
+from api.services.cache import cache_response
 
 router = APIRouter(prefix="/network", tags=["network"])
 
@@ -27,6 +30,7 @@ _rate_limit = get_rate_limit_string()
 
 @router.get("", response_model=NetworkResponse)
 @limiter.limit(_rate_limit)
+@cache_response("network")
 async def get_network(
     request: Request,
     min_odds_ratio: float = Query(
