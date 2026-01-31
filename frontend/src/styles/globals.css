@@ -1,0 +1,302 @@
+/**
+ * Global Styles for Disease Visualizer
+ * 
+ * Imports Tailwind CSS and defines custom CSS properties based on design tokens.
+ * Optimized for the 3D disease network visualization with dark theme.
+ */
+
+/* Tailwind CSS imports */
+@import "tailwindcss";
+
+/* Custom font imports */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* =============================================================================
+   CSS CUSTOM PROPERTIES
+   ============================================================================= */
+
+:root {
+  /* Primary colors */
+  --color-primary-50: #EBF8FF;
+  --color-primary-100: #BEE3F8;
+  --color-primary-200: #90CDF4;
+  --color-primary-300: #63B3ED;
+  --color-primary-400: #4299E1;
+  --color-primary-500: #3182CE;
+  --color-primary-600: #2B6CB0;
+  --color-primary-700: #2C5282;
+  --color-primary-800: #2A4365;
+  --color-primary-900: #1A365D;
+
+  /* Background colors */
+  --color-bg-dark: #0A0F1A;
+  --color-bg-dark-alt: #121929;
+  --color-bg-card: #1A2235;
+  --color-bg-hover: #243049;
+
+  /* Risk colors */
+  --color-risk-very-high: #E53E3E;
+  --color-risk-high: #DD6B20;
+  --color-risk-moderate: #D69E2E;
+  --color-risk-low: #38A169;
+  --color-risk-none: #718096;
+
+  /* Text colors */
+  --color-text-primary: #F7FAFC;
+  --color-text-secondary: #A0AEC0;
+  --color-text-muted: #718096;
+  --color-text-accent: #63B3ED;
+
+  /* Typography */
+  --font-display: 'Space Grotesk', -apple-system, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+  /* Spacing */
+  --space-unit: 4px;
+
+  /* Animation */
+  --transition-fast: 150ms;
+  --transition-normal: 300ms;
+  --transition-slow: 500ms;
+  --easing-default: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.24);
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+}
+
+
+/* =============================================================================
+   BASE STYLES
+   ============================================================================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-bg-dark);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Root container */
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+
+/* =============================================================================
+   TYPOGRAPHY
+   ============================================================================= */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+
+h1 { font-size: 2.25rem; }
+h2 { font-size: 1.875rem; }
+h3 { font-size: 1.5rem; }
+h4 { font-size: 1.25rem; }
+h5 { font-size: 1.125rem; }
+h6 { font-size: 1rem; }
+
+p {
+  color: var(--color-text-secondary);
+}
+
+code, pre, .mono {
+  font-family: var(--font-mono);
+}
+
+
+/* =============================================================================
+   LINKS & BUTTONS
+   ============================================================================= */
+
+a {
+  color: var(--color-text-accent);
+  text-decoration: none;
+  transition: color var(--transition-fast) var(--easing-default);
+}
+
+a:hover {
+  color: var(--color-primary-300);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-size: inherit;
+}
+
+
+/* =============================================================================
+   CANVAS & 3D VISUALIZATION
+   ============================================================================= */
+
+/* Full-screen 3D canvas container */
+.canvas-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+}
+
+/* Ensure Three.js canvas fills container */
+.canvas-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+
+/* =============================================================================
+   UI PANELS & CARDS
+   ============================================================================= */
+
+.panel {
+  background: var(--color-bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(12px);
+}
+
+.panel-glass {
+  background: rgba(26, 34, 53, 0.85);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+
+/* =============================================================================
+   SCROLLBAR STYLING
+   ============================================================================= */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-dark-alt);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+
+/* =============================================================================
+   UTILITY CLASSES
+   ============================================================================= */
+
+/* Risk level backgrounds */
+.bg-risk-very-high { background-color: var(--color-risk-very-high); }
+.bg-risk-high { background-color: var(--color-risk-high); }
+.bg-risk-moderate { background-color: var(--color-risk-moderate); }
+.bg-risk-low { background-color: var(--color-risk-low); }
+.bg-risk-none { background-color: var(--color-risk-none); }
+
+/* Risk level text */
+.text-risk-very-high { color: var(--color-risk-very-high); }
+.text-risk-high { color: var(--color-risk-high); }
+.text-risk-moderate { color: var(--color-risk-moderate); }
+.text-risk-low { color: var(--color-risk-low); }
+.text-risk-none { color: var(--color-risk-none); }
+
+/* Glow effects */
+.glow-primary {
+  box-shadow: 0 0 20px rgba(49, 130, 206, 0.4);
+}
+
+.glow-risk {
+  box-shadow: 0 0 20px rgba(229, 62, 62, 0.4);
+}
+
+/* Animation utilities */
+.animate-pulse-slow {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--transition-normal) var(--easing-default);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+/* =============================================================================
+   RESPONSIVE BREAKPOINTS (Mobile-first)
+   ============================================================================= */
+
+@media (min-width: 640px) {
+  html { font-size: 16px; }
+}
+
+@media (min-width: 768px) {
+  html { font-size: 16px; }
+}
+
+@media (min-width: 1024px) {
+  html { font-size: 16px; }
+}
+
+@media (min-width: 1280px) {
+  html { font-size: 16px; }
+}

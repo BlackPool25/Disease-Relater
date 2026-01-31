@@ -17,6 +17,16 @@ This project provides tools to analyze comorbidity networks derived from 8.9 mil
 
 ```
 Disease-Relater/
+├── frontend/                               # React + TypeScript frontend
+│   ├── src/
+│   │   ├── components/                     # Reusable UI components
+│   │   ├── pages/                          # Page components
+│   │   ├── styles/                         # Design tokens and global CSS
+│   │   ├── types/                          # TypeScript type definitions
+│   │   ├── utils/                          # Utility functions
+│   │   └── App.tsx                         # Main application component
+│   ├── vite.config.ts                      # Vite configuration
+│   └── package.json                        # Frontend dependencies
 ├── Comorbidity-Networks-From-Population-Wide-Health-Data/  # R analysis scripts
 │   ├── Scripts/
 │   │   ├── 1_Make_AdjMatrix_ICD.R          # Create ICD adjacency matrices
@@ -82,6 +92,7 @@ Disease-Relater/
 - Python 3.10 or higher
 - R 4.0 or higher
 - uv (Python package manager) - **strongly recommended**
+- Bun 1.0+ (JavaScript runtime for frontend) - install: `curl -fsSL https://bun.sh/install | bash`
 - Git
 
 ### Installation
@@ -136,6 +147,89 @@ pip install -r requirements.txt
 install.packages(c("igraph", "dplyr", "rgexf", "stringr", "ggplot2", 
                    "cowplot", "ggpubr", "ggalluvial", "RColorBrewer"))
 ```
+
+### Frontend Development
+
+The frontend is a React + TypeScript application for visualizing disease networks in 3D.
+
+#### Prerequisites
+
+- **Bun 1.0+** (JavaScript runtime and package manager)
+  ```bash
+  # Install Bun
+  curl -fsSL https://bun.sh/install | bash
+  ```
+
+#### Setup
+
+```bash
+# Navigate to frontend directory
+cd frontend
+
+# Install dependencies
+bun install
+
+# Start development server (runs on http://localhost:3000)
+bun dev
+
+# Build for production
+bun run build
+
+# Preview production build
+bun run preview
+```
+
+#### Frontend Project Structure
+
+```
+frontend/
+├── src/
+│   ├── components/     # Reusable UI components
+│   ├── pages/          # Page components
+│   ├── api/            # API client and hooks
+│   ├── hooks/          # Custom React hooks
+│   ├── styles/         # Global styles and design tokens
+│   │   ├── design-tokens.ts  # Colors, typography, spacing
+│   │   └── globals.css       # Tailwind CSS + custom styles
+│   ├── utils/          # Utility functions
+│   │   ├── constants.ts      # API endpoints, configuration
+│   │   └── helpers.ts        # Helper functions
+│   ├── types/          # TypeScript type definitions
+│   │   └── index.ts          # API types, interfaces
+│   └── assets/         # Static assets
+├── .env                # Environment variables
+├── .env.example        # Environment template
+├── vite.config.ts      # Vite configuration
+└── package.json        # Dependencies and scripts
+```
+
+#### Environment Variables
+
+Create a `.env` file in the frontend directory:
+
+```env
+# API URL (backend server)
+VITE_API_URL=http://localhost:5000/api
+```
+
+#### Available Scripts
+
+| Command | Description |
+|---------|-------------|
+| `bun dev` | Start development server with hot reload |
+| `bun run build` | Build for production |
+| `bun run preview` | Preview production build locally |
+| `bun run lint` | Run ESLint |
+
+#### Tech Stack
+
+- **React 19** - UI framework
+- **TypeScript** - Type safety
+- **Vite** - Build tool
+- **Tailwind CSS** - Utility-first CSS
+- **Three.js / React Three Fiber** - 3D visualization
+- **Axios** - HTTP client
+- **React Router** - Client-side routing
 
 ## Usage Guide
 
